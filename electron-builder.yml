@@ -1,0 +1,28 @@
+appId: studio.nedenmis.app
+productName: Nedenmiş Studio
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+  - assets/**/*
+asarUnpack:
+  - "**/*.node"
+  - "**/ffmpeg*"
+  - "**/ffprobe*"
+npmRebuild: true
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: NedenmisStudio-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nedenmiş Studio
+publish: null
