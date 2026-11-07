@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { cpus, freemem } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,7 +8,7 @@ import { x as extractTar } from 'tar';
 import type { VoiceEngineProgress, VoiceEngineStatus } from '../../../../shared/types.js';
 import type { Logger } from '../../infrastructure/Logger.js';
 import type { SettingsRepository } from '../../infrastructure/database/SettingsRepository.js';
-import { CHATTERBOX_DEPENDENCY_PROFILE, CHATTERBOX_SOURCE_REVISION, CHATTERBOX_SOURCE_URL } from './ChatterboxSource.js';
+import { CHATTERBOX_DEPENDENCY_PROFILE, CHATTERBOX_MODEL_REVISION, CHATTERBOX_SOURCE_REVISION, CHATTERBOX_SOURCE_URL } from './ChatterboxSource.js';
 
 const PYTHON_RELEASE = '20250317';
 const PYTHON_VERSION = '3.11.11';
@@ -18,8 +18,8 @@ const RUNTIME_FILES = {
 } as const;
 const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
 interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string }
-export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string }
-interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number }
+export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string; sampleRate: number; channels: number; modelRevision: string; textPreprocessing: string; normalizedText: string; decodedText: string; tokenCount: number; unknownTokens: number; seed: number }
+interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number; seed?: number; legacyLowercase?: boolean }
 
 function friendlyProcessError(message: string): string {
   if (/403|429|rate limit/i.test(message)) return 'Model indirme sunucusu isteği sınırladı. Daha sonra yeniden deneyin; yarım indirilen dosyalar korunur.';
@@ -48,7 +48,8 @@ export class VoiceEngineManager {
   private snapshot(): string | undefined {
     const snapshots = join(this.modelsRoot, 'hub', 'models--ResembleAI--chatterbox', 'snapshots');
     if (!existsSync(snapshots)) return undefined;
-    for (const entry of readdirSyncSafe(snapshots)) { const path = join(snapshots, entry); if (REQUIRED_MODEL_FILES.every((file) => existsSync(join(path, file)))) return path; }
+    const pinned = join(snapshots, CHATTERBOX_MODEL_REVISION);
+    if (REQUIRED_MODEL_FILES.every((file) => existsSync(join(pinned, file)))) return pinned;
     return undefined;
   }
   async status(): Promise<VoiceEngineStatus> {
@@ -137,7 +138,7 @@ export class VoiceEngineManager {
     if (!this.worker) this.startWorker(snapshot);
     return new Promise<ChatterboxGeneration>((resolve, reject) => {
       this.current = { resolve, reject };
-      const request = { id: input.id, text: input.text, reference_path: input.referencePath, output_path: input.outputPath, exaggeration: input.exaggeration, cfg_weight: input.cfgWeight, temperature: input.temperature };
+      const request = { id: input.id, text: input.text, reference_path: input.referencePath, output_path: input.outputPath, exaggeration: input.exaggeration, cfg_weight: input.cfgWeight, temperature: input.temperature, seed: input.seed || 0, legacy_lowercase: input.legacyLowercase === true };
       this.worker!.stdin.write(`${JSON.stringify(request)}\n`, (error) => { if (error) { this.current = undefined; reject(error); } });
     });
   }
@@ -156,7 +157,7 @@ export class VoiceEngineManager {
     try { event = JSON.parse(line) as Record<string, unknown>; } catch { this.logger.warn(`Chatterbox çıktısı: ${line.slice(0, 500)}`); return; }
     const type = String(event.event || '');
     if (type === 'result' && this.current) {
-      const generation: ChatterboxGeneration = { outputPath: String(event.output_path), duration: Number(event.duration), generationSeconds: Number(event.generation_seconds), modelLoadSeconds: Number(event.model_load_seconds), referenceSha256: String(event.reference_sha256), model: String(event.model), checkpoint: String(event.checkpoint), device: String(event.device), torch: String(event.torch) };
+      const generation: ChatterboxGeneration = { outputPath: String(event.output_path), duration: Number(event.duration), generationSeconds: Number(event.generation_seconds), modelLoadSeconds: Number(event.model_load_seconds), referenceSha256: String(event.reference_sha256), model: String(event.model), checkpoint: String(event.checkpoint), device: String(event.device), torch: String(event.torch), sampleRate: Number(event.sample_rate), channels: Number(event.channels), modelRevision: String(event.model_revision), textPreprocessing: String(event.text_preprocessing), normalizedText: String(event.normalized_text), decodedText: String(event.decoded_text), tokenCount: Number(event.token_count), unknownTokens: Number(event.unknown_tokens), seed: Number(event.seed) };
       this.saveState({ verifiedAt: new Date().toISOString(), lastGenerationSeconds: generation.generationSeconds, lastReferenceSha256: generation.referenceSha256 }); this.current.resolve(generation); this.current = undefined;
     } else if (type === 'error' && this.current) { this.current.reject(workerError(event, 'Chatterbox sentezi başarısız.')); this.current = undefined; }
     else if (type === 'fatal' && this.current) { this.current.reject(workerError(event, 'Chatterbox worker başlatılamadı.')); this.current = undefined; }
@@ -169,5 +170,4 @@ function workerError(event: Record<string, unknown>, fallback: string): Error {
   const message = String(event.message || fallback); const traceback = typeof event.traceback === 'string' ? event.traceback : '';
   return new Error(traceback ? `${message}\n${traceback}` : message);
 }
-function readdirSyncSafe(path: string): string[] { try { return readdirSync(path); } catch { return []; } }
 async function directorySize(path: string): Promise<number> { if (!existsSync(path)) return 0; let total = 0; for (const entry of await readdir(path, { withFileTypes: true })) { const child = join(path, entry.name); if (entry.isDirectory()) total += await directorySize(child); else { try { total += (await stat(child)).size; } catch { /* Yarım dosya bir sonraki turda okunur. */ } } } return total; }

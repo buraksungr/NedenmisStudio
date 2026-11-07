@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
+import type { Writable } from 'node:stream';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import ffprobeInstaller from '@ffprobe-installer/ffprobe';
 
@@ -34,13 +35,36 @@ export class FFmpegService {
     return { duration: Number(data.format?.duration || 0), width: data.streams?.[0]?.width, height: data.streams?.[0]?.height, codec: data.streams?.[0]?.codec_name, sampleRate: Number(data.streams?.[0]?.sample_rate || 0) || undefined, channels: data.streams?.[0]?.channels };
   }
   run(jobId: string, args: string[], options: FFmpegRunOptions = {}): Promise<void> {
+    return this.execute(jobId, args, options);
+  }
+  runWithInput(jobId: string, args: string[], input: (stdin: Writable) => Promise<void>, options: FFmpegRunOptions = {}): Promise<void> {
+    return this.execute(jobId, args, options, input);
+  }
+  private execute(jobId: string, args: string[], options: FFmpegRunOptions, input?: (stdin: Writable) => Promise<void>): Promise<void> {
     return new Promise((resolve, reject) => {
       const child = spawn(this.ffmpegPath, ['-hide_banner', '-y', ...args], { windowsHide: true });
-      this.active.set(jobId, child); let stderr = ''; let finalLine = '';
+      this.active.set(jobId, child); let stderr = ''; let finalLine = ''; let inputError: Error | undefined;
+      let inputFinished: Promise<void> | undefined;
       const abort = () => { child.kill('SIGKILL'); }; if (options.signal) { if (options.signal.aborted) abort(); else options.signal.addEventListener('abort', abort, { once: true }); }
+      if (input) {
+        child.stdin.on('error', (error) => { if (!options.signal?.aborted) inputError = error; });
+        inputFinished = input(child.stdin).catch((error: unknown) => {
+          inputError = error instanceof Error ? error : new Error(String(error));
+          if (!options.signal?.aborted) child.kill('SIGKILL');
+        });
+      }
       child.stderr.on('data', (chunk: Buffer) => { const text = chunk.toString(); stderr = `${stderr}${text}`.slice(-40000); finalLine = text.trim().split('\n').pop() || ''; const matches = [...text.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)]; if (matches.length && options.onProgress) { const last = matches.at(-1)!; const seconds = Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3]); options.onProgress(seconds, finalLine); } });
       child.on('error', (error) => { this.active.delete(jobId); reject(new Error(`FFmpeg başlatılamadı: ${error.message}`)); });
-      child.on('close', (code) => { this.active.delete(jobId); options.signal?.removeEventListener('abort', abort); if (code === 0) resolve(); else if (options.signal?.aborted) reject(new DOMException('İşlem iptal edildi.', 'AbortError')); else reject(new Error(`FFmpeg ${code} koduyla kapandı.\n${stderr.split('\n').slice(-12).join('\n')}`)); });
+      child.on('close', (code) => {
+        void (async () => {
+          await inputFinished;
+          this.active.delete(jobId); options.signal?.removeEventListener('abort', abort);
+          if (options.signal?.aborted) reject(new DOMException('İşlem iptal edildi.', 'AbortError'));
+          else if (inputError) reject(new Error(`FFmpeg girdi akışı başarısız: ${inputError.message}`));
+          else if (code === 0) resolve();
+          else reject(new Error(`FFmpeg ${code} koduyla kapandı.\n${stderr.split('\n').slice(-12).join('\n')}`));
+        })();
+      });
     });
   }
   cancel(jobId: string): void { const child = this.active.get(jobId); if (child) child.kill('SIGKILL'); }

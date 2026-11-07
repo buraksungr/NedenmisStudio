@@ -5,6 +5,7 @@ import type { AppApi } from '../../shared/types';
 import { DEFAULT_IDENTITY, defaultSettings } from '../../shared/defaults';
 import { App } from '../../src/renderer/App';
 import { sampleProject } from '../helpers';
+import { createIceAnimationProject } from '../fixtures/iceAnimationProject';
 
 function mockApi(): AppApi {
   return {
@@ -34,6 +35,26 @@ describe('React uygulaması smoke testi', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kanal kimliği' })); expect(await screen.findByText('Nedenmiş kanal kimliği')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]); expect(await screen.findByText('Otomatik üretim')).toBeTruthy(); expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Video Editörü' })); expect(await screen.findByText('Kurgu masanız hazır')).toBeTruthy();
+  });
+  it('dört buz sahnesini editörde oynatılabilir animasyon ve ayarlarla açar', async () => {
+    const api = mockApi(); const project = createIceAnimationProject();
+    api.projects.list = vi.fn().mockResolvedValue([project]); api.projects.get = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); window.nedenmis = api;
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Why does ice float on water/ }));
+    const preview = await screen.findByTestId('animated-scene');
+    expect(preview.getAttribute('data-animation-preset')).toBe('liquid-molecules');
+    expect(screen.getByRole('button', { name: 'Oynat' })).toBeTruthy();
+    expect(screen.getByLabelText('Animasyon ön ayarı')).toBeTruthy();
+    expect(screen.getByLabelText('Animasyon hızı')).toBeTruthy();
+    expect(screen.getByLabelText('Parçacık sayısı')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Animasyon ön ayarı'), { target: { value: 'floating-ice' } });
+    await waitFor(() => expect(preview.getAttribute('data-animation-preset')).toBe('floating-ice'));
+    fireEvent.click(screen.getByRole('button', { name: /As water freezes/ }));
+    await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-animation-preset')).toBe('crystallization'));
+    fireEvent.click(screen.getByRole('button', { name: /The open lattice expands/ }));
+    await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-animation-preset')).toBe('lattice-expansion'));
+    fireEvent.click(screen.getByRole('button', { name: /Lower density lets ice float/ }));
+    await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-animation-preset')).toBe('floating-ice'));
   });
   it('metin seçilmeden rewrite göndermez ve seçimle doğru metni gönderir', async () => {
     const api = mockApi(); const project = sampleProject('rewrite-project'); const rewrite = vi.fn().mockResolvedValue('Işık davranışını sadeleştir.');

@@ -50,7 +50,7 @@ export function createAppContext(storagePath: string, databasePath: string, onPr
   const ttsProviders = new Map([new ChatterboxProvider(voiceEngine, ffmpeg, () => settings.get().storagePath, referencePath), new WindowsSapiProvider(ffmpeg), new EdgeTtsProvider(ffmpeg, () => settings.get().ttsPythonPath), new AzureTtsProvider(ffmpeg, credentials)].map((provider) => [provider.id, provider]));
   const tts = new TtsService(projects, mediaRepository, ttsProviders, () => settings.get().storagePath);
   const media = new MediaService(mediaRepository, projects, ffmpeg, () => settings.get().storagePath);
-  const render = new RenderService(projects, exports, ffmpeg, audio, subtitles, () => settings.get(), onProgress, logger);
+  const render = new RenderService(projects, exports, ffmpeg, audio, subtitles, () => settings.get(), onProgress, logger, () => settings.identity());
   projects.recoverInterrupted();
   return { logger, database, projects, mediaRepository, settingsRepository, exports, settings, credentials, ffmpeg, audio, subtitles, topics, projectService, researchProviders, research, llmProviders, ai, visualProviders, visuals, ttsProviders, tts, voiceEngine, media, render };
 }

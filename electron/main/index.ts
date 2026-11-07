@@ -27,6 +27,32 @@ function registerMediaProtocol(): void {
   });
 }
 
+async function verifyInstalledAnimationPreview(window: BrowserWindow, projectName: string): Promise<unknown> {
+  return window.webContents.executeJavaScript(`(async () => {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const name = ${JSON.stringify(projectName)};
+    let opener;
+    for (let i = 0; i < 100 && !opener; i += 1) {
+      opener = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes(name));
+      if (!opener) await sleep(100);
+    }
+    if (!opener) throw new Error('Kalıcı test projesi editörde açılamadı.');
+    opener.click();
+    let preview;
+    for (let i = 0; i < 100 && !preview; i += 1) { preview = document.querySelector('[data-testid="animated-scene"]'); if (!preview) await sleep(100); }
+    if (!preview) throw new Error('Kurulu uygulamada animasyon önizlemesi bulunamadı.');
+    const beforeTime = Number(preview.getAttribute('data-frame-time'));
+    const before = preview.innerHTML;
+    document.querySelectorAll('audio').forEach((audio) => { audio.muted = true; });
+    document.querySelector('button[aria-label="Oynat"]')?.click();
+    await sleep(500);
+    const afterTime = Number(preview.getAttribute('data-frame-time'));
+    const changed = preview.innerHTML !== before;
+    document.querySelector('button[aria-label="Duraklat"]')?.click();
+    return { preset: preview.getAttribute('data-animation-preset'), beforeTime, afterTime, changed, played: afterTime > beforeTime };
+  })()`);
+}
+
 async function createWindow(): Promise<void> {
   initialStorage = join(app.getPath('userData'), 'storage');
   const databasePath = app.isPackaged && process.env.NEDENMIS_SMOKE_TEST && process.env.NEDENMIS_SMOKE_DATABASE ? resolve(process.env.NEDENMIS_SMOKE_DATABASE) : join(app.getPath('userData'), 'nedenmis-studio.sqlite');
@@ -51,12 +77,26 @@ async function createWindow(): Promise<void> {
   registerIpc(context, mainWindow, initialStorage);
   if (process.env.NEDENMIS_SMOKE_TEST) mainWindow.webContents.once('did-finish-load', () => { void (async () => {
     const report: Record<string, unknown> = { ok: true, packaged: app.isPackaged, platform: process.platform, arch: process.arch, version: app.getVersion(), userData: app.getPath('userData'), database: databasePath, storage: initialStorage, voiceBridgeExists: existsSync(app.isPackaged ? join(process.resourcesPath, 'voice-engine', 'bridge.py') : join(app.getAppPath(), 'voice-engine', 'bridge.py')), ffmpegVersion: await context!.ffmpeg.version(), rendererLoaded: true };
+    if (app.isPackaged && process.env.NEDENMIS_SMOKE_PROJECT && mainWindow) report.installedAnimationPreview = await verifyInstalledAnimationPreview(mainWindow, process.env.NEDENMIS_SMOKE_PROJECT);
     if (app.isPackaged && process.env.NEDENMIS_SMOKE_REFERENCE) {
       await context!.voiceEngine.setup();
       const reference = await context!.media.importReference(process.env.NEDENMIS_SMOKE_REFERENCE);
       const voice = await context!.tts.preview({ text: 'Kurulu Nedenmiş Studio uygulaması, gerçek referans sesle Türkçe konuşma üretiyor.', selection: { ...DEFAULT_VOICE }, referenceVoicePath: reference.path });
-      report.installedVoice = { providerId: voice.providerId, checkpoint: voice.engine?.checkpoint, device: voice.engine?.device, referenceSha256: voice.engine?.referenceSha256, generationSeconds: voice.engine?.generationSeconds, duration: voice.duration, audioPath: voice.path };
+      report.installedVoice = { providerId: voice.providerId, checkpoint: voice.engine?.checkpoint, device: voice.engine?.device, referenceSha256: voice.engine?.referenceSha256, generationSeconds: voice.engine?.generationSeconds, duration: voice.duration, audioPath: voice.path, textPreprocessing: voice.engine?.textPreprocessing, unknownTokens: voice.engine?.unknownTokens, decodedText: voice.engine?.decodedText };
       report.projectCount = context!.projects.list().length;
+      context!.voiceEngine.close();
+    }
+    if (app.isPackaged && process.env.NEDENMIS_SMOKE_PROJECT) {
+      const project = context!.projects.list().find((item) => item.name === process.env.NEDENMIS_SMOKE_PROJECT);
+      if (!project) throw new Error('Kurulu uygulamada export için kalıcı proje bulunamadı.');
+      context!.settings.update({ exportPreset: 'standard', outputPath: join(initialStorage, 'exports-installed') });
+      const started = await context!.render.start(project.id); const deadline = Date.now() + 20 * 60 * 1000;
+      let exported = context!.exports.get(started.id);
+      while (!['completed', 'failed', 'cancelled'].includes(exported.status) && Date.now() < deadline) { await new Promise((resolvePromise) => setTimeout(resolvePromise, 1000)); exported = context!.exports.get(started.id); }
+      if (exported.status !== 'completed') throw new Error(`Kurulu uygulama MP4 export’u başarısız: ${exported.error || exported.status}`);
+      const video = await context!.ffmpeg.probe(exported.outputPath);
+      if (video.width !== 1080 || video.height !== 1920 || video.codec !== 'h264') throw new Error('Kurulu uygulama export video özellikleri geçersiz.');
+      report.installedExport = { outputPath: exported.outputPath, status: exported.status, video };
     }
     await writeFile(process.env.NEDENMIS_SMOKE_TEST!, JSON.stringify(report, null, 2), 'utf8'); setTimeout(() => app.quit(), 400);
   })().catch(async (error) => { context?.logger.error('Smoke testi başarısız', error); await writeFile(process.env.NEDENMIS_SMOKE_TEST!, JSON.stringify({ ok: false, error: String(error) }), 'utf8'); app.exit(1); }); });

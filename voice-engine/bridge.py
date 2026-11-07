@@ -17,6 +17,8 @@ import traceback
 import wave
 
 REPO_ID = "ResembleAI/chatterbox"
+# V3 model + tokenizer + decoder are one reproducible bundle, not a moving `main` alias.
+MODEL_REVISION = "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
 REQUIRED_FILES = [
     "ve.pt",
     "t3_mtl23ls_v3.safetensors",
@@ -74,7 +76,7 @@ def command_download(args: argparse.Namespace) -> None:
     snapshot = snapshot_download(
         repo_id=REPO_ID,
         repo_type="model",
-        revision="main",
+        revision=MODEL_REVISION,
         allow_patterns=REQUIRED_FILES,
     )
     missing = [name for name in REQUIRED_FILES if not (Path(snapshot) / name).is_file()]
@@ -88,7 +90,7 @@ class Worker:
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         import torch
-        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS, punc_norm
 
         self.torch = torch
         torch.set_num_threads(args.threads)
@@ -100,9 +102,18 @@ class Worker:
         emit("model_loading", model="Chatterbox Multilingual V3", device="cpu", threads=args.threads)
         started = time.perf_counter()
         self.model = ChatterboxMultilingualTTS.from_local(snapshot, device="cpu", t3_model="v3")
+        self.punc_norm = punc_norm
+        # The archived generic loader defaults to lowercase (V2). The official V3
+        # Space uses T3ConfigMultilingual.text_preproc = "NFKD,fullcase".
+        # Preserve its exact V3 text path instead of feeding V2-normalized tokens.
+        self.legacy_text_to_tokens = self.model.tokenizer.text_to_tokens
+        def v3_text_to_tokens(text: str, language_id: str | None = None, lowercase: bool = False, nfkd_normalize: bool = True):
+            return self.legacy_text_to_tokens(text, language_id=language_id, lowercase=False, nfkd_normalize=nfkd_normalize)
+        self.v3_text_to_tokens = v3_text_to_tokens
+        self.model.tokenizer.text_to_tokens = v3_text_to_tokens
         self.model_load_seconds = round(time.perf_counter() - started, 3)
         self.reference_signature: tuple[str, int, int] | None = None
-        emit("ready", model="Chatterbox Multilingual V3", device="cpu", model_load_seconds=self.model_load_seconds)
+        emit("ready", model="Chatterbox Multilingual V3", device="cpu", model_load_seconds=self.model_load_seconds, model_revision=MODEL_REVISION, text_preprocessing="NFKD,fullcase")
 
     def prepare_reference(self, reference: Path, exaggeration: float) -> str:
         signature = (str(reference), reference.stat().st_size, reference.stat().st_mtime_ns)
@@ -124,6 +135,22 @@ class Worker:
         cfg_weight = float(request.get("cfg_weight", 0.5))
         temperature = float(request.get("temperature", 0.8))
         repetition_penalty = float(request.get("repetition_penalty", 1.2))
+        legacy_lowercase = bool(request.get("legacy_lowercase", False))
+        self.model.tokenizer.text_to_tokens = self.legacy_text_to_tokens if legacy_lowercase else self.v3_text_to_tokens
+        normalized_text = self.punc_norm(text)
+        token_row = self.model.tokenizer.text_to_tokens(normalized_text, language_id="tr")
+        token_ids = [int(value) for value in token_row[0].tolist()]
+        vocabulary = self.model.tokenizer.tokenizer.get_vocab()
+        language_token_id = vocabulary.get("[tr]")
+        unknown_token_id = vocabulary.get("[UNK]", 1)
+        unknown_tokens = sum(value == unknown_token_id for value in token_ids)
+        if language_token_id is None or not token_ids or token_ids[0] != language_token_id:
+            raise RuntimeError("Türkçe [tr] dil tokenı metin dizisinin başına eklenemedi.")
+        decoded_text = self.model.tokenizer.decode(token_ids)
+        seed = int(request.get("seed", 0))
+        if seed:
+            self.torch.manual_seed(seed)
+        emit("tokenization", language="tr", text_preprocessing="legacy-lowercase,NFKD" if legacy_lowercase else "NFKD,fullcase", normalized_text=normalized_text, decoded_text=decoded_text, token_count=len(token_ids), unknown_tokens=unknown_tokens, language_token_id=language_token_id, seed=seed)
         reference_hash = self.prepare_reference(reference, exaggeration)
         output.parent.mkdir(parents=True, exist_ok=True)
         emit("generation_started", language="tr", model="Chatterbox Multilingual V3")
@@ -161,6 +188,15 @@ class Worker:
             checkpoint="t3_mtl23ls_v3.safetensors",
             language="tr",
             device="cpu",
+            sample_rate=int(self.model.sr),
+            channels=1,
+            model_revision=MODEL_REVISION,
+            text_preprocessing="legacy-lowercase,NFKD" if legacy_lowercase else "NFKD,fullcase",
+            normalized_text=normalized_text,
+            decoded_text=decoded_text,
+            token_count=len(token_ids),
+            unknown_tokens=unknown_tokens,
+            seed=seed,
             torch=self.torch.__version__,
         )
 

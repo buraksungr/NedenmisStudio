@@ -4,6 +4,17 @@ export type VisualStyle = 'belgesel' | 'minimal' | 'infografik' | 'sinematik' | 
 export type NarrationStyle = 'belgesel' | 'samimi' | 'enerjik' | 'sakin';
 export type TransitionType = 'fade' | 'dissolve' | 'slide' | 'none';
 export type CameraMovement = 'static' | 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right';
+export type AnimationPreset = 'auto' | 'liquid-molecules' | 'crystallization' | 'lattice-expansion' | 'floating-ice' | 'orbital' | 'galaxy' | 'cellular' | 'energy-waves' | 'geological' | 'weather-systems' | 'river-flow' | 'reaction' | 'neural' | 'data-flow' | 'generic-particles';
+export interface SceneAnimationSettings {
+  enabled: boolean;
+  preset: AnimationPreset;
+  speed: number;
+  intensity: number;
+  particleCount: number;
+}
+export interface ResolvedAnimation extends Omit<SceneAnimationSettings, 'preset'> {
+  preset: Exclude<AnimationPreset, 'auto'>;
+}
 export type MediaKind = 'generated-image' | 'image' | 'video' | 'music' | 'sfx' | 'narration' | 'reference-voice';
 export type ProviderKind = 'llm' | 'research' | 'tts' | 'image';
 export type TimingMode = 'estimated' | 'aligned';
@@ -27,6 +38,7 @@ export interface Scene {
   duration: number;
   transition: TransitionType;
   cameraMovement: CameraMovement;
+  animation?: SceneAnimationSettings;
   subtitles: SubtitleCue[];
   subtitleTiming: TimingMode;
   narrationPath?: string;
@@ -269,7 +281,7 @@ export interface TtsResult {
   timingMode: TimingMode;
   cues?: SubtitleCue[];
   notice?: string;
-  engine?: { model: string; checkpoint: string; device: string; referenceSha256: string; generationSeconds: number; modelLoadSeconds: number };
+  engine?: { model: string; checkpoint: string; device: string; referenceSha256: string; generationSeconds: number; modelLoadSeconds: number; modelRevision?: string; textPreprocessing?: string; normalizedText?: string; decodedText?: string; tokenCount?: number; unknownTokens?: number; sampleRate?: number; channels?: number };
 }
 
 export interface VoiceEngineProgress {

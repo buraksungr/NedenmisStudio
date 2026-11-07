@@ -1,7 +1,11 @@
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Writable } from 'node:stream';
+import sharp from 'sharp';
 import { sceneStartTimes, sanitizeFilename, totalDuration } from '../../../../shared/utils.js';
-import type { AppSettings, ExportProgress, ExportRecord } from '../../../../shared/types.js';
+import type { AppSettings, ChannelIdentity, ExportProgress, ExportRecord } from '../../../../shared/types.js';
+import { DEFAULT_IDENTITY } from '../../../../shared/defaults.js';
+import { renderAnimatedSceneSvg } from '../../../../shared/visuals/sceneAnimation.js';
 import type { ProjectRepository } from '../../infrastructure/database/ProjectRepository.js';
 import type { ExportRepository } from '../../infrastructure/database/ExportRepository.js';
 import type { FFmpegService } from '../../infrastructure/FFmpegService.js';
@@ -10,6 +14,18 @@ import { AudioService } from '../audio/AudioService.js';
 import { SubtitleService } from '../subtitle/SubtitleService.js';
 
 interface Preset { width: number; height: number; crf: number; preset: string; bitrate: string }
+function writeFrame(stdin: Writable, frame: Buffer, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = () => { cleanup(); reject(new DOMException('İşlem iptal edildi.', 'AbortError')); };
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener('abort', abort, { once: true });
+    stdin.write(frame, (error) => { cleanup(); if (error) reject(error); else resolve(); });
+  });
+}
+
+sharp.cache({ memory: 32, files: 0, items: 20 });
+
 const PRESETS: Record<AppSettings['exportPreset'], Preset> = {
   draft: { width: 540, height: 960, crf: 26, preset: 'ultrafast', bitrate: '128k' },
   standard: { width: 1080, height: 1920, crf: 22, preset: 'veryfast', bitrate: '192k' },
@@ -18,11 +34,11 @@ const PRESETS: Record<AppSettings['exportPreset'], Preset> = {
 
 export class RenderService {
   private controllers = new Map<string, AbortController>();
-  constructor(private readonly projects: ProjectRepository, private readonly exports: ExportRepository, private readonly ffmpeg: FFmpegService, private readonly audio: AudioService, private readonly subtitles: SubtitleService, private readonly settings: () => AppSettings, private readonly onProgress: (progress: ExportProgress) => void, private readonly logger: Logger) {}
+  constructor(private readonly projects: ProjectRepository, private readonly exports: ExportRepository, private readonly ffmpeg: FFmpegService, private readonly audio: AudioService, private readonly subtitles: SubtitleService, private readonly settings: () => AppSettings, private readonly onProgress: (progress: ExportProgress) => void, private readonly logger: Logger, private readonly identity: () => ChannelIdentity = () => DEFAULT_IDENTITY) {}
 
   async start(projectId: string): Promise<ExportRecord> {
     const project = this.projects.get(projectId); if (!project.scenes.length) throw new Error('Dışa aktarılacak sahne yok.');
-    const missing = project.scenes.filter((scene) => !scene.assetPath); if (missing.length) throw new Error(`Sahne ${missing.map((s) => s.number).join(', ')} için görsel bulunmuyor.`);
+    const missing = project.scenes.filter((scene) => !scene.assetPath && (scene.assetType !== 'procedural' || scene.animation?.enabled === false)); if (missing.length) throw new Error(`Sahne ${missing.map((s) => s.number).join(', ')} için görsel bulunmuyor.`);
     if ([...this.controllers.values()].length && [...this.controllers.keys()].some((key) => key.endsWith(projectId))) throw new Error('Bu proje zaten dışa aktarılıyor.');
     const config = this.settings(); await mkdir(config.outputPath, { recursive: true });
     const outputPath = join(config.outputPath, `${sanitizeFilename(project.name)}-${new Date().toISOString().replaceAll(':', '-').slice(0, 19)}.mp4`);
@@ -47,24 +63,47 @@ export class RenderService {
         if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
         const scene = project.scenes[index]; const path = join(work, `scene-${String(index).padStart(2, '0')}.mp4`); const isLast = index === project.scenes.length - 1;
         const nextTransition = !isLast && supportsXfade ? (project.scenes[index + 1].transition !== 'none' ? transition : .01) : 0; const duration = scene.duration + nextTransition;
+        const proceduralAnimation = scene.assetType === 'procedural' && scene.animation?.enabled !== false;
+        const frames = Math.max(1, Math.ceil(duration * 30));
         const args: string[] = [];
-        if (scene.assetType === 'video') args.push('-i', scene.assetPath!); else args.push('-i', scene.assetPath!);
         let filter: string;
-        if (scene.assetType === 'video') {
-          filter = `scale=${preset.width}:${preset.height}:force_original_aspect_ratio=increase,crop=${preset.width}:${preset.height},fps=30,format=yuv420p`;
-          if (index === 0 && scene.transition !== 'none') filter += `,fade=t=in:st=0:d=${Math.min(.5, scene.duration / 3)}`;
+        if (proceduralAnimation) {
+          args.push('-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', `${preset.width}x${preset.height}`, '-framerate', '30', '-i', 'pipe:0');
+          filter = 'format=yuv420p';
         } else {
-          const frames = Math.max(1, Math.ceil(duration * 30)); const movement = scene.cameraMovement;
-          const z = movement === 'zoom-out' ? `max(1.07-on*0.00028,1.0)` : `min(1.0+on*0.00028,1.07)`;
-          const x = movement === 'pan-left' ? `(iw-iw/zoom)*(1-on/${frames})` : movement === 'pan-right' ? `(iw-iw/zoom)*on/${frames}` : `iw/2-(iw/zoom/2)`;
-          const y = `ih/2-(ih/zoom/2)`;
-          filter = `scale=${Math.round(preset.width * 1.15)}:${Math.round(preset.height * 1.15)}:force_original_aspect_ratio=increase,crop=${Math.round(preset.width * 1.15)}:${Math.round(preset.height * 1.15)},zoompan=z='${movement === 'static' ? '1.0' : z}':x='${x}':y='${y}':d=${frames}:s=${preset.width}x${preset.height}:fps=30,format=yuv420p`;
-          if (index === 0 && scene.transition !== 'none') filter += `,fade=t=in:st=0:d=${Math.min(.5, scene.duration / 3)}`;
-          if (!supportsXfade && index > 0 && scene.transition !== 'none') filter += ',fade=t=in:st=0:d=0.18';
-          if (!supportsXfade && !isLast && project.scenes[index + 1].transition !== 'none') filter += `,fade=t=out:st=${Math.max(0, duration - .18)}:d=0.18`;
+          args.push('-i', scene.assetPath!);
+          if (scene.assetType === 'video') {
+            filter = `scale=${preset.width}:${preset.height}:force_original_aspect_ratio=increase,crop=${preset.width}:${preset.height},fps=30,format=yuv420p`;
+          } else {
+            const movement = scene.cameraMovement;
+            const z = movement === 'zoom-out' ? `max(1.07-on*0.00028,1.0)` : `min(1.0+on*0.00028,1.07)`;
+            const x = movement === 'pan-left' ? `(iw-iw/zoom)*(1-on/${frames})` : movement === 'pan-right' ? `(iw-iw/zoom)*on/${frames}` : `iw/2-(iw/zoom/2)`;
+            const y = `ih/2-(ih/zoom/2)`;
+            filter = `scale=${Math.round(preset.width * 1.15)}:${Math.round(preset.height * 1.15)}:force_original_aspect_ratio=increase,crop=${Math.round(preset.width * 1.15)}:${Math.round(preset.height * 1.15)},zoompan=z='${movement === 'static' ? '1.0' : z}':x='${x}':y='${y}':d=${frames}:s=${preset.width}x${preset.height}:fps=30,format=yuv420p`;
+          }
         }
-        args.push('-vf', filter, '-t', String(duration), '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', path);
-        await this.ffmpeg.run(`${exportId}-scene-${index}`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 5 + (index + Math.min(1, seconds / duration)) / project.scenes.length * 48, `Sahne ${index + 1}/${project.scenes.length} işleniyor`) });
+        if (index === 0 && scene.transition !== 'none') filter += `,fade=t=in:st=0:d=${Math.min(.5, scene.duration / 3)}`;
+        if (!supportsXfade && index > 0 && scene.transition !== 'none') filter += ',fade=t=in:st=0:d=0.18';
+        if (!supportsXfade && !isLast && project.scenes[index + 1].transition !== 'none') filter += `,fade=t=out:st=${Math.max(0, duration - .18)}:d=0.18`;
+        args.push('-vf', filter, '-t', String(duration), '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-threads', '2');
+        if (proceduralAnimation) args.push('-frames:v', String(frames));
+        args.push(path);
+        if (proceduralAnimation) {
+          const identity = { ...this.identity(), ...project.brand };
+          await this.ffmpeg.runWithInput(`${exportId}-scene-${index}`, args, async (stdin) => {
+            for (let frame = 0; frame < frames; frame += 1) {
+              if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
+              const svg = renderAnimatedSceneSvg(project, scene, identity, frame / 30);
+              const pixels = await sharp(Buffer.from(svg), { density: 72 }).resize(preset.width, preset.height, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
+              if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
+              await writeFrame(stdin, pixels, controller.signal);
+              if (frame % 6 === 0 || frame === frames - 1) this.report(record, 5 + (index + (frame + 1) / frames) / project.scenes.length * 48, `Sahne ${index + 1}/${project.scenes.length} gerçek animasyon kareleri işleniyor`);
+            }
+            stdin.end();
+          }, { signal: controller.signal });
+        } else {
+          await this.ffmpeg.run(`${exportId}-scene-${index}`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 5 + (index + Math.min(1, seconds / duration)) / project.scenes.length * 48, `Sahne ${index + 1}/${project.scenes.length} işleniyor`) });
+        }
         segments.push(path);
       }
       if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');

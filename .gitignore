@@ -18,6 +18,7 @@ Thumbs.db
 .tmp/
 temp/
 test-results/
+.verification/
 playwright-report/
 NedenmisStudio.zip
 *.exe
@@ -25,3 +26,5 @@ NedenmisStudio.zip
 assets/reference_voice.wav
 storage/
 .chatterbox-test-storage/
+__pycache__/
+*.pyc
