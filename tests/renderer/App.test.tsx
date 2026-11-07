@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppApi } from '../../shared/types';
 import { DEFAULT_IDENTITY, defaultSettings } from '../../shared/defaults';
@@ -38,9 +38,9 @@ describe('React uygulaması smoke testi', () => {
   it('metin seçilmeden rewrite göndermez ve seçimle doğru metni gönderir', async () => {
     const api = mockApi(); const project = sampleProject('rewrite-project'); const rewrite = vi.fn().mockResolvedValue('Işık davranışını sadeleştir.');
     api.projects.create = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); api.ai = { rewrite } as unknown as AppApi['ai']; window.nedenmis = api;
-    render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0); fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]); expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy(); fireEvent.click(await screen.findByRole('button', { name: 'Projeyi oluştur' }));
+    render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0); fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]); expect(await screen.findByText('Öne çıkan konular')).toBeTruthy(); expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy(); fireEvent.click(await screen.findByRole('button', { name: 'Projeyi oluştur' }));
     expect(await screen.findByText('Anlatım senaryosu')).toBeTruthy(); const button = screen.getByRole('button', { name: 'Akıcılaştır' }) as HTMLButtonElement; expect(button.disabled).toBe(true); fireEvent.click(button); expect(rewrite).not.toHaveBeenCalled();
     const editor = screen.getByPlaceholderText('Senaryonuzu buraya yazın veya sağdaki üretim düğmesini kullanın…') as HTMLTextAreaElement; editor.setSelectionRange(0, 6); fireEvent.select(editor); expect(button.disabled).toBe(false); fireEvent.click(button);
-    expect(rewrite).toHaveBeenCalledWith(expect.objectContaining({ projectId: project.id, selectedText: project.script.slice(0, 6), instruction: 'improve' }));
+    await waitFor(() => expect(rewrite).toHaveBeenCalledWith(expect.objectContaining({ projectId: project.id, selectedText: project.script.slice(0, 6), instruction: 'improve' })));
   });
 });

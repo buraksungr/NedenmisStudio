@@ -1,187 +1,120 @@
-# Nedenmiş Studio
+# Nedenmiş Studio 1.1
 
-**Nedenmiş Studio**, Türkçe merak ve bilim anlatıları için konu keşfinden 1080×1920 MP4 çıktısına kadar çalışan, Electron tabanlı bir masaüstü video üretim uygulamasıdır. Ücretli bir API olmadan proje yönetimi, yerel taslak, prosedürel infografik, medya kitaplığı, editör ve Windows sistem sesi kullanılabilir.
+Nedenmiş Studio; Türkçe konu keşfi, kaynaklı araştırma, senaryo, sahne görselleri, **gerçek Chatterbox Multilingual V3 ses klonlama**, altyazı, çok kanallı edit ve FFmpeg ile 1080×1920 MP4 üretimini tek Windows masaüstü uygulamasında birleştirir.
 
-> Teslim paketi kaynak kodu içerir. Windows kurucusunu kendi bilgisayarınızda üretmek için aşağıdaki **Windows EXE oluşturma** bölümünü izleyin. Haricî API ve TTS bağlantıları, anahtarlarınızla ayrıca doğrulanmalıdır; hiçbir çevrimiçi özellik çalışıyormuş gibi gösterilmez.
+## Windows kurulumu
 
-## Öne çıkanlar
+GitHub Releases bölümündeki dosyalar:
 
-- Otomatik veya özel konu ile dört aşamalı, onaylı üretim sihirbazı
-- Türkçe senaryo, seçili metni/tamamını yeniden yazma ve konuşma süresi tahmini
-- Kaynak URL'si, başlığı ve doğrulanmamış iddia durumu saklayan modüler araştırma
-- Her anlatım sahnesine özel yönetmen açıklaması ve CPU ile çalışan gerçek prosedürel diyagramlar
-- OpenAI/Gemini metin, Tavily/bağımsız web araştırma ve OpenAI görsel sağlayıcı arayüzleri
-- Windows SAPI, izole Edge TTS ve Azure AI Speech için sağlayıcıdan bağımsız seslendirme
-- Görsel, anlatım, müzik ve efekt kanallarına ayrılmış zaman çizelgesi
-- Sahne taşıma, süre, çoğaltma, silme, tek sahne yeniden üretme, video/görsel aktarma
-- Düzenlenebilir ASS altyazıları, vurgu kelimeleri, tipografi, renk, kontur ve konum
-- FFmpeg ile kamera hareketleri, geçişler, ses kırpma/konumlandırma/solma ve anlatımda müzik kısma
-- Otomatik SQLite kaydı, yarım kalan render kurtarma, medya ve dışa aktarım geçmişi
-- Anahtarları renderer'a göstermeyen güvenli IPC; desteklenen sistemlerde `safeStorage`
-- Açık/koyu/sistem teması ve düzenlenebilir Nedenmiş kanal kimliği
+- **`NedenmisStudio-Setup.exe`** — Windows 10/11 x64 NSIS kurucusu
+- **`NedenmisStudio-Portable.zip`** — kurulumsuz taşınabilir paket
+- **`NedenmisStudio.zip`** — eksiksiz kaynak kod, şema, testler ve belgeler
 
-## Gereksinimler
+Kurucuyu çalıştırın, kurulum klasörünü seçin ve **Nedenmiş Studio** kısayolunu açın. PowerShell, Vite veya ayrı bir sunucu gerekmez. Electron, React, ana süreç, SQLite, FFmpeg ve üretim varlıkları pakete dahildir.
 
-- Windows 10 veya Windows 11, 64 bit
-- **Node.js 22 LTS** ve npm (Node 22 önerilir)
-- İlk kurulum ve çevrimiçi sağlayıcılar için internet
-- FFmpeg ayrıca kurulmak zorunda değildir; npm paketleri platforma uygun binary indirir
-- Edge TTS isteğe bağlıdır; mevcut Python 3.14 kurulumunuza dokunulmaz
+> **Chatterbox modeli installer içine gömülmez.** 500M model ve CPU bağımlılıkları birkaç GB yer kapladığı için ilk kullanımda uygulama içinden indirilir. Böylece installer makul boyutta kalır; model yalnızca bir kez indirilir ve sonraki açılışlarda çevrimdışı kullanılır.
 
-Uygulama GPU gerektirmez. Standart render CPU üzerinde `libx264` kullanır. Intel Core i7-7660U gibi işlemcilerde 1080×1920 üretim süresi video süresinden uzun olabilir; gerçek zamanlı render vaat edilmez. İlk denemelerde **Hızlı taslak** ön ayarını seçin.
+## Chatterbox’ı ilk kez kurma
 
-## Kurulum
+1. Uygulamada **Ses Stüdyosu → Chatterbox Multilingual V3** seçin.
+2. **Kur ve modeli indir** düğmesine basın.
+3. İlerleme alanında üç aşamayı izleyin:
+   - izole Python 3.11.11,
+   - CPU-only PyTorch 2.6 ve ses bağımlılıkları,
+   - Chatterbox Multilingual V3 model dosyaları.
+4. **Referans kaydı yükle** ile izinli WAV, MP3 veya M4A kaydınızı seçin.
+5. Kayıt otomatik olarak mono, 24 kHz, 16 bit PCM WAV’a dönüştürülür ve kullanıcı veri klasöründeki `storage/assets/reference_voice.wav` konumunda saklanır.
+6. **Gerçek klonlamayı sına** düğmesine basın. Bu düğme bağlantı kontrolü yapmaz; gerçek Türkçe metni, gerçek referans koşullarıyla V3 modelinden geçirir, WAV üretir ve FFprobe ile doğrular.
+7. Başarılı testten sonra **Sesi dinle** ile önizleme üretin veya **Varsayılan yap ve projeye uygula** ile anlatıcıyı aktif projeye atayın.
 
-1. `NedenmisStudio.zip` dosyasını çıkarın.
-2. **NedenmisStudio** klasöründe PowerShell veya Terminal açın.
-3. Node.js 22'yi doğrulayın:
+Model ve bağımlılıklar Ayarlar’da gösterilen depolama alanının `voice-engine/` klasöründedir. Yarım kalan indirmeler yeniden denemede kullanılabilir. Hugging Face, GitHub, PyPI ve `download.pytorch.org` erişimi ilk kurulumda gereklidir.
 
-   ```powershell
-   node --version
-   npm --version
-   ```
+### Gerçek klonlama nasıl çalışır?
 
-4. Bağımlılıkları kurun:
+- Python köprüsü `ChatterboxMultilingualTTS.from_local(..., t3_model="v3")` ile yalnızca `t3_mtl23ls_v3.safetensors` kontrol noktasını yükler.
+- Yüklediğiniz kayıt `prepare_conditionals(reference)` ile konuşmacı gömmesi ve koşullarına dönüştürülür.
+- Her Türkçe üretim `language_id="tr"` ile aynı V3 worker üzerinde yapılır.
+- Referans profili tüm sahnelerde yeniden kullanılır; her sahne için model yeniden başlatılmaz.
+- Referansın SHA-256 değeri ve V3 çıkarım süresi başarılı sonuçla birlikte kaydedilir.
+- Chatterbox başarısızsa uygulama **SAPI, Edge veya Azure’a sessizce geçmez**. Kurulum/referans hatasını gösterir.
+- Üretilen WAV FFprobe ile doğrulanmadan “klonlama başarılı” denmez. Konuşmacı benzerliği otomatik ölçülmez; örneği dinleyerek değerlendirmeniz gerekir.
 
-   ```powershell
-   npm ci
-   ```
+Resmî [Chatterbox deposu](https://github.com/resemble-ai/chatterbox) Türkçe dahil 23 dili ve V3 API’sini belgeler. Proje Ağustos 2026’da arşivlenmiştir; artık bakım yapılmamaktadır. Kod/model MIT koşullarıyla sunulur. Yalnızca açık izniniz olan sesleri kullanın ve yayın koşullarını kendiniz doğrulayın.
 
-   `postinstall` adımı `better-sqlite3` modülünü Electron sürümüne göre hazırlar. Kurumsal ağ veya proxy kullanıyorsanız npm ve GitHub erişimine izin verin. Native derleme gerekirse “Desktop development with C++” bileşeni içeren Visual Studio Build Tools gerekebilir.
+### Donanım ve Python uyumluluğu
 
-5. Geliştirme modunda açın:
+Hedef makine: Windows 10 x64, Intel Core i7-7660U, ayrık GPU yok, Node.js 24.22.0 ve mevcut Python 3.14.6.
 
-   ```powershell
-   npm run dev
-   ```
+- Uygulama gerçek CPU/RAM miktarını **Sistem bilgisi** üzerinden okur; RAM kapasitesi varsayılmaz.
+- V3 yaklaşık 500M parametrelidir ve bu CPU’da gerçek zamanlı çalışması beklenmemelidir. İlk model yüklemesi ve sahne başına çıkarım uzun sürebilir.
+- CPU worker en fazla dört iş parçacığı, float32 ve tekil sahne kuyruğu kullanır. Aynı anda birden fazla model başlatılmaz.
+- Kısa sahneler, düşük eşzamanlı uygulama sayısı ve yeterli boş RAM önerilir. Bellek yetersizse uygulama bunu açıkça bildirir; başka motora geçmez.
+- Resmî Chatterbox geliştirme ortamı Python 3.11’dir. Bu nedenle uygulama **Python 3.14.6 kurulumunuza dokunmaz** ve kendi kullanıcı klasöründe izole Python 3.11.11 kullanır.
+- PyTorch/torchaudio 2.6 yalnızca CPU paket deposundan kurulur; CUDA toolkit veya NVIDIA sürücüsü gerekmez.
+- Daha güçlü donanım yoksa pratik seçenek kısa sahnelerle yerel V3 kullanmaktır. Klonlama şart değilse Azure/Edge/SAPI elle seçilebilir; bunların standart sesleri referans klonlamaz.
 
-Üretim paketini yerel olarak doğrulamak için:
+### Model parametreleri
+
+- **Konuşma hızı:** V3 çıktısına FFmpeg `atempo` uygulanır.
+- **İfade yoğunluğu:** `exaggeration`
+- **Yönlendirme ağırlığı:** `cfg_weight`
+- **Örnekleme sıcaklığı:** `temperature`
+
+Model perde kontrolü sunmadığı için Chatterbox’ta perde düğmesi gösterilmez. Türkçe telaffuz ve konuşmacı benzerliği kayda/metne göre değişebilir; yayın öncesi dinleme zorunludur.
+
+## Alternatif TTS sağlayıcıları
+
+Bunlar birincil motor değildir ve yalnızca kullanıcı seçerse kullanılır:
+
+- **Azure AI Speech:** Ahmet/Emel Türkçe kurumsal nöral sesler; anahtar ve bölge gerekir.
+- **Edge Neural TTS:** isteğe bağlı izole `edge-tts` ortamı; Ahmet/Emel ve kelime zamanlaması.
+- **Windows SAPI:** kurulu Türkçe Windows konuşma paketiyle çevrimdışı ses.
+
+Seçim hem önizlemeye hem de **Varsayılan yap ve projeye uygula** sonrasında proje anlatımına uygulanır. Standart Azure, Edge ve SAPI sesleri referans klonlamaz; arayüz bunu açıkça belirtir.
+
+Edge’i mevcut Python’dan ayrı kurmak isterseniz:
+
+```powershell
+py -3.12 -m venv .venv-tts
+.\.venv-tts\Scripts\python.exe -m pip install edge-tts
+```
+
+Python yolunu **Ayarlar → Genel ve üretim → İzole TTS Python** alanına girin. Bu ortam Chatterbox’ın yönetilen Python 3.11 ortamından bağımsızdır.
+
+## Kaynak koddan çalıştırma
+
+Gereksinimler: Windows 10/11 x64, **Node.js 24.22.0** veya uyumlu Node 24, npm ve internet.
+
+```powershell
+npm ci
+npm run dev
+```
+
+`npm ci` Electron binary’lerini ve Electron için native SQLite ABI’sini hazırlar. `predev`/`prestart` Electron ABI’sini, `pretest` ise Node test ABI’sini kontrol eder. Native derleme gerekirse Visual Studio “Desktop development with C++” Build Tools gerekebilir.
+
+Üretim kodunu doğrulama:
 
 ```powershell
 npm run build
 npm run start
 ```
 
-## İlk yapılandırma
-
-Uygulamayı açtıktan sonra **Ayarlar → Genel ve üretim** bölümünde:
-
-- Tema ve çıktı kalitesini seçin.
-- Video çıktı ve medya depolama klasörlerini belirleyin.
-- FFmpeg durumunu **Yeniden sına** ile kontrol edin.
-- Paket FFmpeg kullanılamıyorsa kendi `ffmpeg.exe` dosyanızı seçin. FFmpeg 5 veya üzeri önerilir.
-
-**Ayarlar → Kanal kimliği** bölümünde kanal adı, slogan, logo, renkler, altyazı, açılış/kapanış, anlatım ve varsayılan müzik tercihlerini kaydedin. Yeni projeler bu kimliği kullanır; editördeki **Tasarım** sekmesinden proje bazında renk ve kanal adı değiştirilebilir.
-
-## API yapılandırması
-
-API anahtarlarını yalnızca **Ayarlar → Yapay zekâ sağlayıcıları** ekranından girin. Anahtarlar arayüze geri döndürülmez. `safeStorage` kullanılabiliyorsa işletim sistemi şifrelemesi uygulanır; kullanılamıyorsa yerel obfuscation kullanılacağı için kullanıcı hesabınızı koruyun.
-
-| Amaç | Sağlayıcı | Gereken |
-|---|---|---|
-| Senaryo ve sahne yönetimi | Yerel taslak | Anahtarsız; web yoksa olgusal metin üretmez |
-| Senaryo | OpenAI | OpenAI API anahtarı |
-| Senaryo | Google Gemini | Gemini API anahtarı |
-| Araştırma | Bağımsız Web Arama | Anahtarsız; ağ/sonuç erişimi değişebilir |
-| Araştırma | Tavily | Tavily API anahtarı |
-| Görsel | Prosedürel infografik | Anahtarsız ve çevrimdışı |
-| Görsel | OpenAI Images | OpenAI görsel API anahtarı |
-| Seslendirme | Azure AI Speech | Speech anahtarı ve `AZURE_SPEECH_REGION` |
-
-Sağlayıcıyı etkinleştirdikten sonra **Sına** düğmesini kullanın. “Hazır” yalnızca yapılandırma bulunduğunu belirtir; gerçek API erişimi testle doğrulanır. Görsel ve metin üretim testleri hesabınızdan ücret/kota tüketebilir.
-
-`.env.example` yalnızca desteklenen ortam değişkenlerinin adlarını gösterir. **Gerçek `.env` dosyaları Git'e ve ZIP'e eklenmez.** Uygulamada anahtar girmek en kolay yöntemdir. Azure bölgesi gerekiyorsa terminalde örneğin:
+Windows kurucusu ve taşınabilir paket:
 
 ```powershell
-$env:AZURE_SPEECH_REGION="westeurope"
-npm run dev
-```
-
-## Türkçe TTS kurulumu
-
-### Seçenek A — Windows sistem sesi (çevrimdışı)
-
-1. Windows **Ayarlar → Saat ve dil → Konuşma** bölümünü açın.
-2. Türkçe konuşma paketini ve varsa Türkçe erkek sesi kurun.
-3. Nedenmiş Studio → **Ses Stüdyosu → Windows Türkçe Ses** seçeneğini seçin.
-4. Kurulu sesleri yeniden yüklemek için uygulamayı yeniden başlatın ve önizleme üretin.
-
-Bu yöntem anahtar gerektirmez. Doğallık ve ticari kullanım hakları Windows'ta kurulu sesin koşullarına bağlıdır. Referans sesten klonlama yapmaz.
-
-### Seçenek B — Edge Neural Türkçe (izole Python)
-
-Mevcut Python 3.14 kurulumunuzu değiştirmeden ayrı Python 3.12 ortamı oluşturun. Python 3.12 yoksa resmî python.org yükleyicisini veya `winget install Python.Python.3.12` komutunu kullanabilirsiniz.
-
-Proje klasöründe:
-
-```powershell
-py -3.12 -m venv .venv-tts
-.\.venv-tts\Scripts\python.exe -m pip install --upgrade pip
-.\.venv-tts\Scripts\python.exe -m pip install edge-tts
-.\.venv-tts\Scripts\python.exe -m edge_tts --version
-```
-
-Ardından **Ayarlar → Genel ve üretim → İzole TTS Python çalıştırılabilir dosyası** alanına şu yolu girin:
-
-```text
-TAM_PROJE_YOLU\.venv-tts\Scripts\python.exe
-```
-
-**Ses Stüdyosu** içinde Ahmet veya Emel sesini seçin. Edge sağlayıcısı konuşma sınırlarından altyazı hizalaması alabilir; VTT alınamazsa sürelerin tahmini olduğu açıkça gösterilir. Edge TTS'nin ticari kullanım için resmî garantisi varsayılmaz; koşulları kontrol edin. Ticari üretim için Azure AI Speech değerlendirin.
-
-### Seçenek C — Azure AI Speech
-
-1. Azure portalında Speech kaynağı oluşturun.
-2. Anahtarı uygulamadaki Azure Speech alanına kaydedin.
-3. Bölgeyi yukarıdaki ortam değişkeniyle belirtin.
-4. Ahmet/Emel Türkçe sesini seçip **Sına** ve **Sesi dinle** düğmelerini kullanın.
-
-Standart Azure sesleri referans kayıttan klonlama yapmaz. Custom Neural Voice ayrı yetkilendirme ve onay gerektirir; bu pakette klonlama yapılmış gibi gösterilmez.
-
-## Referans ses
-
-En güvenli yöntem **Ses Stüdyosu → Referans ses → Referans kaydı yükle** düğmesidir. WAV, MP3 veya M4A dosyası mono 24 kHz WAV'a dönüştürülür ve Ayarlar'da gösterilen depolama alanındaki `assets/reference_voice.wav` yoluna yazılır. Kaydı dinleyebilir, değiştirebilir veya kaldırabilirsiniz.
-
-Geliştirme kurulumunda kaynak klasöre `assets/reference_voice.wav` koyarsanız uygulama ilk açılışta dosyayı içe aktarmayı da dener. Bu kişisel dosya `.gitignore` ile korunur ve ZIP'e eklenmez.
-
-Yalnızca açık izniniz olan sesleri kullanın. Mevcut üç TTS sağlayıcısı referans klonlamayı desteklemediğinden kayıt saklanır fakat klonlama yapılmış gibi davranılmaz; seçilen doğal Türkçe ses kullanılır.
-
-## İlk videonuzu üretin
-
-1. **Yeni video → Otomatik üretim** veya **Özel üretim** seçin.
-2. Konu/kategori, hedef süre, anlatım ve görsel stili belirleyip **Projeyi oluştur** deyin.
-3. Araştırma sağlayıcısını çalıştırın. Kaynak başlıklarına tıklayarak olguları kontrol edin. Web yoksa araştırma yapılmadığı belirtilir.
-4. **Senaryoyu üret** deyin. Metni doğrudan düzenleyin veya seçili bölümü akıcılaştırın/kısaltın.
-5. **Sahne planını oluştur** deyin ve her sahnenin anlatımla ilişkisini inceleyin.
-6. **Tüm görselleri üret** deyin. Prosedürel motor API olmadan gerçek PNG diyagramları üretir.
-7. Ses Stüdyosu'ndan sesi seçip test edin; ardından **Seslendir ve editöre geç** deyin.
-8. Editörde sahne sırasını, süreyi, görselleri, altyazıları ve ses kanallarını düzenleyin.
-9. Müzik/efekt eklemek için **Ses miksajı → Ekle** kullanın. Klips başlangıcı, süresi, kırpması, seviyesi ve solmaları düzenlenebilir.
-10. **Dışa aktar → MP4 oluştur** deyin. İlk denemede Hızlı taslak; finalde Standart 1080×1920 seçin.
-11. İlerlemeyi izleyin. Gerekirse **Renderi iptal et** kullanın; proje kaybolmaz. Tamamlanan dosyayı **Klasörde göster** ile açın.
-
-**Kısayollar:** Boşluk oynat/duraklat, sol/sağ ok bir saniye hareket, zaman çizelgesinde sürükleme sahne sırasını değiştirir.
-
-## Windows EXE oluşturma
-
-En güvenilir paketleme Windows 10/11 x64 üzerindedir:
-
-```powershell
-npm ci
 npm run test
-npm run build
 npm run dist:win
+npm run pack:portable
 ```
 
-Kurucu şu konumda oluşur:
+Çıktılar:
 
 ```text
-release\NedenmisStudio-Setup-1.0.0.exe
+release\NedenmisStudio-Setup.exe
+release\NedenmisStudio-Portable.zip
 ```
 
-`electron-builder` gerekirse Visual Studio Build Tools ve GitHub/npm binary indirmelerine erişim ister. Antivirüs imzasız kurucuyu uyarabilir; dağıtım öncesinde bir kod imzalama sertifikası eklemeniz önerilir. Kaynak depoda `.exe` dosyaları ve gerçek anahtarlar bulunmaz.
-
-## Doğrulama komutları
+## Testler
 
 ```powershell
 npm run typecheck
@@ -191,22 +124,54 @@ npm run build
 npm audit --omit=dev
 ```
 
-Ayrıntılar ve ortam sınırlamaları için **TEST_REPORT.md** dosyasına bakın.
+Gerçek model testi standart testlerde **simüle edilmez ve otomatik çalıştırılmaz**. Windows CI, sentetik ve izinli bir SAPI konuşmacı referansı üretip şu zinciri gerçek modelle çalıştırır:
 
-## Veri ve güvenlik
+1. Yönetilen Python ve CPU bağımlılıklarını kurar.
+2. Multilingual V3 modelini indirir.
+3. Referansı mono 24 kHz WAV’a dönüştürür.
+4. Türkçe referanslı önizleme üretir.
+5. İki sahnenin tamamını aynı konuşmacı koşullarıyla seslendirir.
+6. Prosedürel görseller ve altyazılarla 1080×1920 H.264/AAC MP4 üretir.
+7. SQLite veritabanını kapatıp yeniden açarak kalıcılığı doğrular.
+8. NSIS kurar ve kurulu uygulamayı terminal/Vite olmadan açar.
 
-- SQLite şeması: `electron/main/infrastructure/database/schema.sql`
-- Veritabanında WAL, yabancı anahtar, busy timeout ve migrasyon sürümü kullanılır.
-- Renderer'da Node entegrasyonu kapalı, context isolation ve sandbox açıktır.
-- IPC girdileri Zod ile doğrulanır; medya protokolü yalnızca izinli depolama köklerini sunar.
-- Medya silme, proje içinde kullanılan dosyaları korur.
-- Render ayrı işlemde çalışır; kapanışta işlemler durdurulur ve yarım projeler bir sonraki açılışta kurtarılır.
-- Günlükler depolama klasöründeki `logs/nedenmis-studio.log` dosyasındadır; anahtarlar günlüğe yazılmamalıdır.
+Ayrıntılı, tarihli sonuçlar ve yapılamayan testler için **TEST_REPORT.md** dosyasına bakın.
+
+## Video üretim akışı
+
+1. **Yeni video → Otomatik üretim** veya **Özel üretim** seçin.
+2. Konu, kategori, süre, anlatım ve görsel stili belirleyin.
+3. Araştırmayı çalıştırın; kaynak URL’lerini ve doğrulanmamış özetleri inceleyin.
+4. Senaryoyu üretin/düzenleyin. Yeniden yazma için önce metin seçin; seçim yoksa düğmeler kapalıdır.
+5. Sahne planını ve her sahneye özel görsel yönetmen açıklamasını oluşturun.
+6. Prosedürel infografikleri üretin veya OpenAI görsel sağlayıcısını yapılandırın.
+7. Chatterbox referansını doğrulayıp projeyi seslendirin.
+8. Editörde sahne sırası, süre, video/görsel, altyazı, geçiş, kamera ve ses kanallarını düzenleyin.
+9. **Dışa aktar → MP4 oluştur** ile CPU renderı başlatın. İlk denemede Hızlı taslak seçin.
+
+## Diğer AI sağlayıcıları
+
+**Ayarlar → Yapay zekâ sağlayıcıları** bölümünden OpenAI, Gemini ve Tavily anahtarlarını girebilirsiniz. Anahtarlar renderer’a döndürülmez; desteklenen sistemlerde Electron `safeStorage` kullanılır. “Sına” gerçek sağlayıcıya istek atabilir ve hesap kotası tüketebilir.
+
+API’siz kullanım: yerel yapısal senaryo taslağı, çevrimdışı konu havuzu, prosedürel görseller, medya kitaplığı, editör, FFmpeg ve Chatterbox modeli indirildikten sonra yerel ses üretimi.
+
+`.env.example` yalnızca yer tutucu değişken adları içerir. Gerçek `.env`, anahtar, kullanıcı veritabanı ve referans kayıtlar Git/ZIP paketine eklenmez.
+
+## Veri konumları ve güvenlik
+
+- SQLite, ayarlar, medya, referans, model ve önizlemeler Electron `userData`/depolama klasöründedir; geçici build klasöründe tutulmaz.
+- Şema: `electron/main/infrastructure/database/schema.sql`
+- Node integration kapalı, context isolation ve sandbox açıktır.
+- IPC girdileri Zod ile doğrulanır. Hatalar kullanıcıya temiz Türkçe mesajla gösterilir; teknik ayrıntılar `logs/nedenmis-studio.log` içindedir.
+- Medya protokolü yalnızca izinli depolama köklerine erişir.
+- Projeler otomatik kaydedilir; yarım renderlar kurtarılır.
+- FFmpeg ve Python worker ayrı işlemlerdir; arayüz iş parçacığında model/render çalıştırılmaz.
 
 ## Bilinen sınırlar
 
-- Editör güvenilir **sahne düzeyinde** bir zaman çizelgesidir; kare kare kesme, manyetik ripple ve çoklu seçim içeren profesyonel NLE değildir.
-- Bağımsız web arama başlık/özet getirir; otomatik olgu doğrulaması yapmaz. Yayın öncesi kaynak kontrolü gerekir.
-- Eski FFmpeg yedeğinde `xfade` yoksa sahneler güvenli karartma/birleştirme ile işlenir. Tam dissolve/slide için FFmpeg 5+ kullanın.
-- Bulut sağlayıcılarının kullanılabilirliği, fiyatı, model adları ve koşulları zamanla değişebilir; bağlantı testi zorunludur.
-- Referans ses yönetimi vardır; yetkili ses klonlama sağlayıcısı entegrasyonu yoktur.
+- Editör sahne/klips düzeyindedir; kare kare profesyonel NLE değildir.
+- Araştırma özetleri otomatik olgu doğrulaması değildir.
+- Chatterbox altyazıları tahminidir; Edge kelime sınırları sağlayabilir.
+- Eski FFmpeg yedeğinde `xfade` yoksa karartmalı concat kullanılır. Modern geçişler için FFmpeg 5+ önerilir.
+- V3’ün i7-7660U üzerindeki süresi metin uzunluğu ve kullanılabilir RAM’e bağlıdır; gerçek zamanlı üretim vaat edilmez.
+- Kurulum, model barındırma veya PyTorch altyapısı değişirse **Yerel bileşeni kur** ve **Gerçek klonlamayı sına** adımlarını yeniden çalıştırın.
