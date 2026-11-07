@@ -40,17 +40,23 @@ def sha256(path: Path) -> str:
 
 
 def command_status(_: argparse.Namespace) -> None:
+    import inspect
     import torch
     import torchaudio
-    from chatterbox.mtl_tts import ChatterboxMultilingualTTS  # noqa: F401
+    from chatterbox import mtl_tts
     from importlib.metadata import version
 
+    v3_supported = (
+        "t3_model" in inspect.signature(mtl_tts.ChatterboxMultilingualTTS.from_local).parameters
+        and getattr(mtl_tts, "MULTILINGUAL_T3_MODELS", {}).get("v3") == "t3_mtl23ls_v3.safetensors"
+    )
     emit(
         "status",
         python=platform.python_version(),
         torch=torch.__version__,
         torchaudio=torchaudio.__version__,
         chatterbox=version("chatterbox-tts"),
+        v3_supported=v3_supported,
         cuda=bool(torch.cuda.is_available()),
         platform=platform.platform(),
     )

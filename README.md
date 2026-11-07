@@ -27,7 +27,7 @@ Kurucuyu çalıştırın, kurulum klasörünü seçin ve **Nedenmiş Studio** k�
 6. **Gerçek klonlamayı sına** düğmesine basın. Bu düğme bağlantı kontrolü yapmaz; gerçek Türkçe metni, gerçek referans koşullarıyla V3 modelinden geçirir, WAV üretir ve FFprobe ile doğrular.
 7. Başarılı testten sonra **Sesi dinle** ile önizleme üretin veya **Varsayılan yap ve projeye uygula** ile anlatıcıyı aktif projeye atayın.
 
-Model ve bağımlılıklar Ayarlar’da gösterilen depolama alanının `voice-engine/` klasöründedir. Yarım kalan indirmeler yeniden denemede kullanılabilir. Hugging Face, GitHub, PyPI ve `download.pytorch.org` erişimi ilk kurulumda gereklidir.
+Model ve bağımlılıklar Ayarlar’da gösterilen depolama alanının `voice-engine/` klasöründedir. Yarım kalan indirmeler yeniden denemede kullanılabilir. Hugging Face, GitHub, PyPI ve `download.pytorch.org` erişimi ilk kurulumda gereklidir. Yönetici, V3 API’si bulunan resmî [`ab55923c`](https://github.com/resemble-ai/chatterbox/commit/ab55923c27757c90cfcc407baa57dc25a7d25217) kaynak commit’ini sabitler; yalnızca V2 yükleyen PyPI 0.1.7 wheel’ini kullanmaz.
 
 ### Gerçek klonlama nasıl çalışır?
 
@@ -39,7 +39,7 @@ Model ve bağımlılıklar Ayarlar’da gösterilen depolama alanının `voice-e
 - Chatterbox başarısızsa uygulama **SAPI, Edge veya Azure’a sessizce geçmez**. Kurulum/referans hatasını gösterir.
 - Üretilen WAV FFprobe ile doğrulanmadan “klonlama başarılı” denmez. Konuşmacı benzerliği otomatik ölçülmez; örneği dinleyerek değerlendirmeniz gerekir.
 
-Resmî [Chatterbox deposu](https://github.com/resemble-ai/chatterbox) Türkçe dahil 23 dili ve V3 API’sini belgeler. Proje Ağustos 2026’da arşivlenmiştir; artık bakım yapılmamaktadır. Kod/model MIT koşullarıyla sunulur. Yalnızca açık izniniz olan sesleri kullanın ve yayın koşullarını kendiniz doğrulayın.
+Resmî [Chatterbox deposu](https://github.com/resemble-ai/chatterbox) Türkçe dahil 23 dili ve V3 API’sini belgeler. Proje Ağustos 2026’da emekli araştırma projesi olarak duyurulmuştur; artık bakım yapılmamaktadır. Kod/model MIT koşullarıyla sunulur. Yalnızca açık izniniz olan sesleri kullanın ve yayın koşullarını kendiniz doğrulayın.
 
 ### Donanım ve Python uyumluluğu
 

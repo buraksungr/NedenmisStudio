@@ -8,6 +8,7 @@ import { x as extractTar } from 'tar';
 import type { VoiceEngineProgress, VoiceEngineStatus } from '../../../../shared/types.js';
 import type { Logger } from '../../infrastructure/Logger.js';
 import type { SettingsRepository } from '../../infrastructure/database/SettingsRepository.js';
+import { CHATTERBOX_SOURCE_REVISION, CHATTERBOX_SOURCE_URL } from './ChatterboxSource.js';
 
 const PYTHON_RELEASE = '20250317';
 const PYTHON_VERSION = '3.11.11';
@@ -16,7 +17,7 @@ const RUNTIME_FILES = {
   linux: 'cpython-3.11.11+20250317-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
 } as const;
 const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
-interface StoredState { dependenciesInstalled?: boolean; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string }
+interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string }
 export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string }
 interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number }
 
@@ -52,7 +53,7 @@ export class VoiceEngineManager {
   }
   async status(): Promise<VoiceEngineStatus> {
     const state = this.state(); const snapshot = this.snapshot();
-    return { runtimeInstalled: existsSync(this.python()), dependenciesInstalled: Boolean(state.dependenciesInstalled && existsSync(this.python())), modelDownloaded: Boolean(snapshot), referenceAvailable: Boolean(this.referencePath() && existsSync(this.referencePath()!)), verifiedAt: state.verifiedAt, lastGenerationSeconds: state.lastGenerationSeconds, pythonVersion: state.pythonVersion, torchVersion: state.torchVersion, setupRunning: Boolean(this.setupPromise), modelPath: snapshot, componentPath: this.root };
+    return { runtimeInstalled: existsSync(this.python()), dependenciesInstalled: Boolean(state.dependenciesInstalled && state.sourceRevision === CHATTERBOX_SOURCE_REVISION && existsSync(this.python())), modelDownloaded: Boolean(snapshot), referenceAvailable: Boolean(this.referencePath() && existsSync(this.referencePath()!)), verifiedAt: state.verifiedAt, lastGenerationSeconds: state.lastGenerationSeconds, pythonVersion: state.pythonVersion, torchVersion: state.torchVersion, setupRunning: Boolean(this.setupPromise), modelPath: snapshot, componentPath: this.root };
   }
   private progress(stage: VoiceEngineProgress['stage'], message: string, extra: Partial<VoiceEngineProgress> = {}): void { this.emit({ stage, message, ...extra }); }
   setup(): Promise<VoiceEngineStatus> {
@@ -63,7 +64,7 @@ export class VoiceEngineManager {
   private async performSetup(): Promise<VoiceEngineStatus> {
     await mkdir(this.root, { recursive: true });
     if (!existsSync(this.python())) await this.installRuntime();
-    if (!this.state().dependenciesInstalled) await this.installDependencies();
+    if (!this.state().dependenciesInstalled || this.state().sourceRevision !== CHATTERBOX_SOURCE_REVISION) await this.installDependencies();
     if (!this.snapshot()) await this.downloadModel();
     this.progress('complete', 'Chatterbox Multilingual V3 yerel bileşeni hazır. Gerçek klonlama sınaması yapabilirsiniz.', { progress: 1 });
     return this.status();
@@ -92,13 +93,15 @@ export class VoiceEngineManager {
     await this.run(this.python(), ['-m', 'pip', 'install', '--only-binary=:all:', 'numpy==1.26.4'], 'dependencies');
     await this.run(this.python(), ['-m', 'pip', 'install', '--only-binary=:all:', 'torch==2.6.0', 'torchaudio==2.6.0', '--index-url', 'https://download.pytorch.org/whl/cpu'], 'dependencies');
     await this.run(this.python(), ['-m', 'pip', 'install', '--only-binary=:all:', '-r', join(this.resources, 'requirements-runtime.txt')], 'dependencies');
-    await this.run(this.python(), ['-m', 'pip', 'install', '--only-binary=:all:', '--no-deps', 'chatterbox-tts==0.1.7'], 'dependencies');
+    this.progress('dependencies', 'Resmî Chatterbox Multilingual V3 kaynak kodu kuruluyor…');
+    await this.run(this.python(), ['-m', 'pip', 'install', '--no-deps', '--force-reinstall', '--no-build-isolation', CHATTERBOX_SOURCE_URL], 'dependencies');
     const output = await this.run(this.python(), [this.bridge(), 'status'], 'dependencies');
     const statusLine = output.split('\n').filter((line) => line.includes('"event": "status"')).at(-1);
     if (!statusLine) throw new Error('Chatterbox bağımlılıkları doğrulanamadı.');
-    const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean };
+    const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean; v3_supported: boolean };
     if (details.cuda) throw new Error('CPU-only kurulum beklenirken CUDA etkin PyTorch bulundu. Yönetilen bileşeni yeniden kurun.');
-    this.saveState({ dependenciesInstalled: true, pythonVersion: details.python, torchVersion: details.torch });
+    if (!details.v3_supported) throw new Error('Kurulan Chatterbox paketi Multilingual V3 desteklemiyor. V2’ye geri dönülmeyecek; resmî V3 kaynak kurulumunu yeniden deneyin.');
+    this.saveState({ dependenciesInstalled: true, sourceRevision: CHATTERBOX_SOURCE_REVISION, pythonVersion: details.python, torchVersion: details.torch });
   }
   private async downloadModel(): Promise<void> {
     this.progress('model', 'Chatterbox Multilingual V3 modeli Hugging Face üzerinden indiriliyor…', { progress: 0 });
