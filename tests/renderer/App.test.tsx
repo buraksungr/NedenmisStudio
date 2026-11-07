@@ -1,0 +1,46 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AppApi } from '../../shared/types';
+import { DEFAULT_IDENTITY, defaultSettings } from '../../shared/defaults';
+import { App } from '../../src/renderer/App';
+import { sampleProject } from '../helpers';
+
+function mockApi(): AppApi {
+  return {
+    projects: { list: vi.fn().mockResolvedValue([]) },
+    settings: { get: vi.fn().mockImplementation(async () => defaultSettings('/tmp/nedenmis')) },
+    identity: { get: vi.fn().mockResolvedValue(DEFAULT_IDENTITY) },
+    topics: { discover: vi.fn().mockResolvedValue([{ id: 't1', title: 'Gökyüzü neden mavi?', category: 'Bilim', hook: 'Işık neden saçılır?', score: 96, reason: 'Görsel potansiyel' }]) },
+    dashboard: { stats: vi.fn().mockResolvedValue({ projectCount: 0, completedCount: 0, totalRenderedSeconds: 0, exportCount: 0, weeklyProjects: 0 }) },
+    exports: { list: vi.fn().mockResolvedValue([]), onProgress: vi.fn().mockReturnValue(() => undefined) },
+    system: { info: vi.fn().mockResolvedValue({ platform: 'win32', version: '1.0.0', ffmpegAvailable: true, storagePath: '/tmp', cpuCores: 4, totalMemoryGB: 8, freeMemoryGB: 5.5 }), mediaUrl: (path?: string) => path || '' },
+    media: { list: vi.fn().mockResolvedValue([]) },
+    voiceEngine: { status: vi.fn().mockResolvedValue({ runtimeInstalled: false, dependenciesInstalled: false, modelDownloaded: false, referenceAvailable: false, setupRunning: false, componentPath: '/tmp/voice-engine' }), setup: vi.fn(), onProgress: vi.fn().mockReturnValue(() => undefined) },
+    tts: { providers: vi.fn().mockResolvedValue([{ id: 'chatterbox-multilingual-v3', kind: 'tts', name: 'Chatterbox Multilingual V3', configured: false, requiresKey: false, description: 'Yerel klonlama', referenceVoiceSupported: true, commercialNote: 'MIT', local: true, voices: [{ id: 'reference-tr', name: 'Referans', language: 'tr-TR', gender: 'unknown', description: 'Klon', styles: [] }], supportsSpeed: true, supportsPitch: false }, { id: 'windows-sapi', kind: 'tts', name: 'Windows Türkçe Ses', configured: true, requiresKey: false, description: 'Yerel ses', referenceVoiceSupported: false, commercialNote: 'Sistem koşulları', local: true, voices: [{ id: 'auto-tr', name: 'Türkçe erkek', language: 'tr-TR', gender: 'male', description: 'Yerel', styles: [] }], supportsSpeed: true, supportsPitch: false }]) },
+  } as unknown as AppApi;
+}
+
+describe('React uygulaması smoke testi', () => {
+  beforeEach(() => { window.nedenmis = mockApi(); Object.defineProperty(window, 'matchMedia', { writable: true, value: vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }) }); });
+  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+  it('ana sayfayı ve tüm temel çalışma alanlarını açar', async () => {
+    render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Projeler' })); expect(await screen.findByText('Proje arşiviniz henüz boş')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Medya Kitaplığı' })); expect(await screen.findByText('Bu bölümde medya yok')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ses Stüdyosu' })); expect(await screen.findByText('Konuşma sağlayıcısı')).toBeTruthy(); expect((await screen.findAllByText('Windows Türkçe Ses')).length).toBeGreaterThan(0); expect((await screen.findAllByText('Chatterbox Multilingual V3')).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Ayarlar' })); expect(await screen.findByText('Görünüm ve dil')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Yapay zekâ sağlayıcıları' })); expect(await screen.findByText('Metin ve senaryo')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Kanal kimliği' })); expect(await screen.findByText('Nedenmiş kanal kimliği')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]); expect(await screen.findByText('Otomatik üretim')).toBeTruthy(); expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Video Editörü' })); expect(await screen.findByText('Kurgu masanız hazır')).toBeTruthy();
+  });
+  it('metin seçilmeden rewrite göndermez ve seçimle doğru metni gönderir', async () => {
+    const api = mockApi(); const project = sampleProject('rewrite-project'); const rewrite = vi.fn().mockResolvedValue('Işık davranışını sadeleştir.');
+    api.projects.create = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); api.ai = { rewrite } as unknown as AppApi['ai']; window.nedenmis = api;
+    render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0); fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]); expect(await screen.findByText('Öne çıkan konular')).toBeTruthy(); expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy(); fireEvent.click(await screen.findByRole('button', { name: 'Projeyi oluştur' }));
+    expect(await screen.findByText('Anlatım senaryosu')).toBeTruthy(); const button = screen.getByRole('button', { name: 'Akıcılaştır' }) as HTMLButtonElement; expect(button.disabled).toBe(true); fireEvent.click(button); expect(rewrite).not.toHaveBeenCalled();
+    const editor = screen.getByPlaceholderText('Senaryonuzu buraya yazın veya sağdaki üretim düğmesini kullanın…') as HTMLTextAreaElement; editor.setSelectionRange(0, 6); fireEvent.select(editor); expect(button.disabled).toBe(false); fireEvent.click(button);
+    await waitFor(() => expect(rewrite).toHaveBeenCalledWith(expect.objectContaining({ projectId: project.id, selectedText: project.script.slice(0, 6), instruction: 'improve' })));
+  });
+});

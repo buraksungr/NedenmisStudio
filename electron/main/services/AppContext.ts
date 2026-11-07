@@ -1,0 +1,58 @@
+import { join } from 'node:path';
+import { AppDatabase } from '../infrastructure/database/Database.js';
+import { ProjectRepository } from '../infrastructure/database/ProjectRepository.js';
+import { MediaRepository } from '../infrastructure/database/MediaRepository.js';
+import { SettingsRepository } from '../infrastructure/database/SettingsRepository.js';
+import { ExportRepository } from '../infrastructure/database/ExportRepository.js';
+import { CredentialStore } from '../infrastructure/CredentialStore.js';
+import { FFmpegService } from '../infrastructure/FFmpegService.js';
+import { Logger } from '../infrastructure/Logger.js';
+import { TopicService } from './topics/TopicService.js';
+import { OfflineResearchProvider, DuckDuckGoResearchProvider, TavilyResearchProvider } from './research/ResearchProviders.js';
+import { ResearchService } from './research/ResearchService.js';
+import { LocalScriptProvider } from './ai/LocalScriptProvider.js';
+import { OpenAiProvider } from './ai/OpenAiProvider.js';
+import { GeminiProvider } from './ai/GeminiProvider.js';
+import { ScriptService } from './ai/ScriptService.js';
+import { ProceduralVisualProvider } from './visual/ProceduralVisualProvider.js';
+import { OpenAiImageProvider } from './visual/OpenAiImageProvider.js';
+import { VisualService } from './visual/VisualService.js';
+import { ChatterboxProvider } from './tts/ChatterboxProvider.js';
+import { VoiceEngineManager } from './tts/VoiceEngineManager.js';
+import { WindowsSapiProvider } from './tts/WindowsSapiProvider.js';
+import { EdgeTtsProvider } from './tts/EdgeTtsProvider.js';
+import { AzureTtsProvider } from './tts/AzureTtsProvider.js';
+import { TtsService } from './tts/TtsService.js';
+import { MediaService } from './media/MediaService.js';
+import { AudioService } from './audio/AudioService.js';
+import { SubtitleService } from './subtitle/SubtitleService.js';
+import { RenderService } from './render/RenderService.js';
+import { ProjectService } from './projects/ProjectService.js';
+import { SettingsService } from './settings/SettingsService.js';
+import type { ExportProgress, VoiceEngineProgress } from '../../../shared/types.js';
+
+export function createAppContext(storagePath: string, databasePath: string, onProgress: (progress: ExportProgress) => void, voiceResources = join(process.cwd(), 'voice-engine'), onVoiceProgress: (progress: VoiceEngineProgress) => void = () => undefined) {
+  const logger = new Logger(join(storagePath, 'logs'));
+  const database = new AppDatabase(databasePath);
+  const settingsRepository = new SettingsRepository(database); const credentials = new CredentialStore(settingsRepository);
+  const projects = new ProjectRepository(database); const mediaRepository = new MediaRepository(database); const exports = new ExportRepository(database);
+  const settings = new SettingsService(settingsRepository, credentials, storagePath);
+  const ffmpeg = new FFmpegService(() => settings.get().ffmpegPath); const audio = new AudioService(ffmpeg); const subtitles = new SubtitleService();
+  const topics = new TopicService(); const projectService = new ProjectService(projects);
+  const researchProviders = new Map([new OfflineResearchProvider(), new DuckDuckGoResearchProvider(), new TavilyResearchProvider(credentials)].map((provider) => [provider.id, provider]));
+  const research = new ResearchService(projects, researchProviders, () => settings.get().activeResearchProvider);
+  const llmProviders = new Map([new LocalScriptProvider(), new OpenAiProvider(credentials), new GeminiProvider(credentials)].map((provider) => [provider.id, provider]));
+  const ai = new ScriptService(projects, llmProviders, () => settings.get().activeLlmProvider, () => settings.identity());
+  const visualProviders = new Map([new ProceduralVisualProvider(), new OpenAiImageProvider(credentials)].map((provider) => [provider.id, provider]));
+  const visuals = new VisualService(projects, mediaRepository, visualProviders, () => settings.get().storagePath, () => settings.identity(), () => settings.get().activeImageProvider);
+  const referencePath = () => mediaRepository.list('reference-voice')[0]?.path;
+  const voiceEngine = new VoiceEngineManager(() => settings.get().storagePath, voiceResources, settingsRepository, logger, referencePath, onVoiceProgress);
+  const ttsProviders = new Map([new ChatterboxProvider(voiceEngine, ffmpeg, () => settings.get().storagePath, referencePath), new WindowsSapiProvider(ffmpeg), new EdgeTtsProvider(ffmpeg, () => settings.get().ttsPythonPath), new AzureTtsProvider(ffmpeg, credentials)].map((provider) => [provider.id, provider]));
+  const tts = new TtsService(projects, mediaRepository, ttsProviders, () => settings.get().storagePath);
+  const media = new MediaService(mediaRepository, projects, ffmpeg, () => settings.get().storagePath);
+  const render = new RenderService(projects, exports, ffmpeg, audio, subtitles, () => settings.get(), onProgress, logger);
+  projects.recoverInterrupted();
+  return { logger, database, projects, mediaRepository, settingsRepository, exports, settings, credentials, ffmpeg, audio, subtitles, topics, projectService, researchProviders, research, llmProviders, ai, visualProviders, visuals, ttsProviders, tts, voiceEngine, media, render };
+}
+
+export type AppContext = ReturnType<typeof createAppContext>;

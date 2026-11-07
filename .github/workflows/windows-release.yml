@@ -1,0 +1,122 @@
+name: Windows EXE ve gerçek Chatterbox doğrulaması
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  windows-production:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+          cache: npm
+      - name: Bağımlılıklar
+        run: npm ci
+      - name: Electron runtime doğrulaması
+        run: node scripts/ensure-electron.mjs
+      - name: Statik kontroller ve standart testler
+        run: |
+          npm run typecheck
+          npm run lint
+          npm run test
+      - name: Üretim derlemesi
+        run: npm run build
+      - name: Geliştirme Electron açılışı
+        shell: cmd
+        run: |
+          if not exist release mkdir release
+          node scripts/electron-smoke.mjs --dev > release\dev-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\dev-electron-smoke.log
+          exit /b %CODE%
+      - name: Üretim Electron açılışı
+        shell: cmd
+        run: |
+          node scripts/electron-smoke.mjs > release\production-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\production-electron-smoke.log
+          exit /b %CODE%
+      - name: Gerçek sentetik konuşmacı referansı
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\nedenmis-chatterbox" | Out-Null
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/fixtures/create_reference.ps1 -OutputPath "$env:RUNNER_TEMP\nedenmis-chatterbox\sapi-reference.wav"
+      - name: Gerçek Chatterbox V3 Türkçe klonlama ve video testi
+        env:
+          NEDENMIS_CHATTERBOX_E2E: '1'
+          NEDENMIS_CHATTERBOX_SETUP: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_CHATTERBOX_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\sapi-reference.wav
+          NEDENMIS_CHATTERBOX_RESULT: ${{ github.workspace }}\release\chatterbox-test-result.json
+        shell: cmd
+        run: |
+          npm run test:chatterbox > release\chatterbox-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\chatterbox-e2e.log
+          exit /b %CODE%
+      - name: Windows x64 NSIS kurucusu
+        run: npm run dist:win
+      - name: Taşınabilir ZIP
+        run: node scripts/package-portable.mjs
+      - name: Kur, terminalsiz aç ve SQLite doğrula
+        shell: pwsh
+        run: ./scripts/test-installer.ps1 -SetupPath ./release/NedenmisStudio-Setup.exe -VoiceTestRoot "$env:RUNNER_TEMP\nedenmis-chatterbox"
+      - name: Başarısızlık loglarını CI annotation’a yaz
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $sections = @()
+          Get-ChildItem release -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
+            $raw = [IO.File]::ReadAllText($_.FullName).Replace("`r", "`n")
+            $clean = [regex]::Replace($raw, '\x1B\[[0-9;]*[A-Za-z]', '')
+            $tail = (($clean -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 70) -join "`n")
+            $escaped = $tail.Replace('%', '%25').Replace("`n", '%0A')
+            Write-Host "::error::$($_.Name)%0A$escaped"
+            $sections += "## $($_.Name)`n``````text`n$tail`n``````"
+          }
+          if ($sections.Count) {
+            [IO.File]::WriteAllText("$PWD/release/failure-summary.md", "CI $($env:GITHUB_RUN_ID) teknik hata özeti`n`n$($sections -join "`n`n")")
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/failure-summary.md }
+          }
+      - name: Test ve ses/video kanıtlarını paketle
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          if (Test-Path "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\previews") { Copy-Item "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\previews" -Destination release -Recurse -Force }
+          if (Test-Path "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports") { Copy-Item "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports" -Destination release -Recurse -Force }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NedenmisStudio-Windows-Test-Kanitlari
+          path: |
+            release/*.json
+            release/*.log
+            release/previews/**
+            release/exports/**
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NedenmisStudio-Windows-x64
+          path: |
+            release/NedenmisStudio-Setup.exe
+            release/NedenmisStudio-Portable.zip
+            release/installer-test-result.json
+            release/chatterbox-test-result.json
+          if-no-files-found: error
+      - name: GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-v1.1.0-build$($env:GITHUB_RUN_NUMBER)"
+          gh release create $tag release/NedenmisStudio-Setup.exe release/NedenmisStudio-Portable.zip release/installer-test-result.json release/chatterbox-test-result.json --target $env:GITHUB_SHA --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build $env:GITHUB_RUN_NUMBER" --notes "Gerçek Chatterbox Multilingual V3 referans testi, iki sahne anlatımı, 1080x1920 MP4, SQLite ve kurulu uygulama smoke testi bu iş akışında başarılı olmadan bu adım çalışmaz. Model birkaç GB olduğu için ilk kullanımda Ses Stüdyosu'ndan indirilir."
