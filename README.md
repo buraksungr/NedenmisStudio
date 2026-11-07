@@ -4,7 +4,7 @@ Nedenmiş Studio; Türkçe konu keşfi, kaynaklı araştırma, senaryo, sahne g�
 
 ## Windows kurulumu
 
-GitHub Releases bölümündeki dosyalar:
+[Doğrulanmış Windows x64 Build 10 Release](https://github.com/buraksungr/NedenmisStudio/releases/tag/windows-v1.1.0-build10) ve dağıtım paketleri:
 
 - **`NedenmisStudio-Setup.exe`** — Windows 10/11 x64 NSIS kurucusu
 - **`NedenmisStudio-Portable.zip`** — kurulumsuz taşınabilir paket
@@ -134,8 +134,9 @@ Gerçek model testi standart testlerde **simüle edilmez ve otomatik çalıştı
 6. Prosedürel görseller ve altyazılarla 1080×1920 H.264/AAC MP4 üretir.
 7. SQLite veritabanını kapatıp yeniden açarak kalıcılığı doğrular.
 8. NSIS kurar ve kurulu uygulamayı terminal/Vite olmadan açar.
+9. Kurulu EXE’nin kalıcı projeleri açtığını ve paketlenmiş V3 ile aynı referanstan yeni Türkçe WAV ürettiğini doğrular.
 
-Ayrıntılı, tarihli sonuçlar ve yapılamayan testler için **TEST_REPORT.md** dosyasına bakın.
+Build 10’da 7,92 saniyelik kaynak önizlemesi 146,277 saniyede, 8,24 saniyelik kurulu uygulama önizlemesi 121,904 saniyede üretildi (2 çekirdek AMD EPYC CI; i7-7660U benchmark’ı değildir). Ayrıntılı, tarihli sonuçlar ve yapılamayan testler için **TEST_REPORT.md** dosyasına bakın.
 
 ## Video üretim akışı
 

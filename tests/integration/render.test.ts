@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +17,7 @@ import { DEFAULT_IDENTITY, defaultSettings, generateSubtitleCues, id } from '../
 import type { Scene } from '../../shared/types.js';
 import { projectInput } from '../helpers.js';
 
+const execFileAsync = promisify(execFile);
 const directory = await mkdtemp(join(tmpdir(), 'nedenmis-render-')); afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 describe('Uçtan uca örnek MP4 render', () => {
   it('iki görsel sahne, anlatım, altyazı ve geçişle 1080×1920 H.264/AAC üretir', async () => {
@@ -33,6 +36,7 @@ describe('Uçtan uca örnek MP4 render', () => {
     while (Date.now() < deadline) { const status = exports.get(started.id).status; if (['completed', 'failed', 'cancelled'].includes(status)) break; await new Promise((resolve) => setTimeout(resolve, 300)); }
     const record = exports.get(started.id); expect(record.error).toBeUndefined(); expect(record.status).toBe('completed'); expect(record.progress).toBe(100);
     const probe = await ffmpeg.probe(record.outputPath); expect(probe.width).toBe(1080); expect(probe.height).toBe(1920); expect(probe.codec).toBe('h264'); expect(probe.duration).toBeGreaterThan(2); expect((await stat(record.outputPath)).size).toBeGreaterThan(20000);
+    const audioProbe = await execFileAsync(ffmpeg.ffprobePath, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'default=noprint_wrappers=1', record.outputPath]); expect(audioProbe.stdout).toContain('codec_name=aac');
     expect(projects.get(project.id).status).toBe('completed'); db.close();
   }, 120000);
 });
