@@ -25,16 +25,20 @@ jobs:
       - name: Üretim derlemesi
         run: npm run build
       - name: Geliştirme Electron açılışı
-        shell: pwsh
+        shell: cmd
         run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          node scripts/electron-smoke.mjs --dev 2>&1 | Tee-Object release/dev-electron-smoke.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if not exist release mkdir release
+          node scripts/electron-smoke.mjs --dev > release\dev-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\dev-electron-smoke.log
+          exit /b %CODE%
       - name: Üretim Electron açılışı
-        shell: pwsh
+        shell: cmd
         run: |
-          node scripts/electron-smoke.mjs 2>&1 | Tee-Object release/production-electron-smoke.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/electron-smoke.mjs > release\production-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\production-electron-smoke.log
+          exit /b %CODE%
       - name: Gerçek sentetik konuşmacı referansı
         shell: pwsh
         run: |
@@ -47,7 +51,12 @@ jobs:
           NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
           NEDENMIS_CHATTERBOX_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\sapi-reference.wav
           NEDENMIS_CHATTERBOX_RESULT: ${{ github.workspace }}\release\chatterbox-test-result.json
-        run: npm run test:chatterbox
+        shell: cmd
+        run: |
+          npm run test:chatterbox > release\chatterbox-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\chatterbox-e2e.log
+          exit /b %CODE%
       - name: Windows x64 NSIS kurucusu
         run: npm run dist:win
       - name: Taşınabilir ZIP
@@ -55,6 +64,16 @@ jobs:
       - name: Kur, terminalsiz aç ve SQLite doğrula
         shell: pwsh
         run: ./scripts/test-installer.ps1 -SetupPath ./release/NedenmisStudio-Setup.exe
+      - name: Başarısızlık loglarını CI annotation’a yaz
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem release -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
+            $text = [IO.File]::ReadAllText($_.FullName)
+            if ($text.Length -gt 12000) { $text = $text.Substring($text.Length - 12000) }
+            $escaped = $text.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A').Replace(':', '%3A').Replace(',', '%2C')
+            Write-Host "::error::$($_.Name)%0A$escaped"
+          }
       - name: Test ve ses/video kanıtlarını paketle
         if: always()
         shell: pwsh
