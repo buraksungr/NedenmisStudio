@@ -1,6 +1,16 @@
 name: Windows EXE ve gerçek Chatterbox doğrulaması
 on:
   workflow_dispatch:
+    inputs:
+      drive_upload_only:
+        description: 'Başarılı bir run’ın mevcut Release dosyalarını yalnızca Drive’a yükle'
+        required: false
+        default: false
+        type: boolean
+      source_run_id:
+        description: 'Başarıyla tamamlanmış Windows production run ID'
+        required: false
+        type: string
   pull_request:
     branches: [main]
 permissions:
@@ -8,6 +18,7 @@ permissions:
   pull-requests: write
 jobs:
   windows-production:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.drive_upload_only }}
     runs-on: windows-latest
     timeout-minutes: 240
     steps:
@@ -29,6 +40,7 @@ jobs:
           npm run typecheck
           npm run lint
           python -m unittest discover -s voice-engine -p "test_*.py"
+          python -m unittest scripts/test_drive_upload_release.py
           npm run test
       - name: Üretim derlemesi
         run: npm run build
@@ -210,3 +222,94 @@ jobs:
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/exports -Filter *.mp4 -File | ForEach-Object { $_.FullName }
           gh release create $tag @assets --target $env:GITHUB_SHA --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build $env:GITHUB_RUN_NUMBER" --notes "Gerçek Chatterbox Multilingual V3, V3 NFKD/fullcase ön işlemesi ve gerçek Türkçe referansla A/B sınandı. Dört sahneli Buz neden suda yüzer? projesi, gerçek nesne animasyonu, 1080x1920/30 FPS MP4, altyazı, SQLite, kurulu uygulama önizlemesi/export ve bağımsız Türkçe ASR kalite kapıları başarılı olmadan bu adım çalışmaz. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model birkaç GB olduğu için ilk kullanımda Ses Stüdyosu'ndan indirilir."
+
+  drive-upload:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.drive_upload_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Başarılı kaynak run ve Release bütünlüğünü doğrula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          EXPECTED_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_RUN_ID"
+          echo "SOURCE_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
+          gh run view "$SOURCE_RUN_ID" --json status,conclusion,headSha,headBranch,number,url > source-run.json
+          python - <<'PY'
+          import json, os
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Kaynak Windows production run başarılı değil.'
+          assert run['headBranch'] == os.environ['EXPECTED_BRANCH'], 'Kaynak run manuel işin branchiyle eşleşmiyor.'
+          print(f"Doğrulanmış kaynak: {run['url']} · {run['headSha']}")
+          PY
+          SOURCE_TAG="windows-v1.1.0-build$(python -c "import json; print(json.load(open('source-run.json'))['number'])")"
+          echo "SOURCE_TAG=$SOURCE_TAG" >> "$GITHUB_ENV"
+          python -c "import json,os; print('SOURCE_HEAD_SHA='+json.load(open('source-run.json'))['headSha'])" >> "$GITHUB_ENV"
+          python -c "import json; print('SOURCE_BRANCH='+json.load(open('source-run.json'))['headBranch'])" >> "$GITHUB_ENV"
+          gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json
+          python - <<'PY'
+          import json, os
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          release = json.load(open('source-release.json', encoding='utf-8'))
+          assert release['targetCommitish'] == run['headSha'], 'Release hedef commiti kaynak run ile eşleşmiyor.'
+          print(f"Doğrulanmış Release: {release['url']}")
+          PY
+          gh release download "$SOURCE_TAG" --dir release-source
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('release-source')
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          manifest = json.loads((root / 'build-manifest.json').read_text(encoding='utf-8-sig'))
+          assert str(manifest['runId']) == os.environ['SOURCE_RUN_ID']
+          assert manifest['commit'] == run['headSha']
+          for item in manifest['files']:
+              path = root / item['name']
+              digest = hashlib.sha256()
+              with path.open('rb') as source:
+                  for block in iter(lambda: source.read(8 * 1024 * 1024), b''):
+                      digest.update(block)
+              assert path.stat().st_size == item['bytes'], f"Boyut eşleşmedi: {path.name}"
+              assert digest.hexdigest() == item['sha256'], f"SHA-256 eşleşmedi: {path.name}"
+              print(f"SHA-256 doğrulandı: {path.name} · {digest.hexdigest()}")
+          quality = json.loads((root / 'turkish-quality-result.json').read_text(encoding='utf-8-sig'))
+          assert quality['ok'] and all(case['asrIntelligibilityPassed'] for case in quality['cases'] if case['required'])
+          installed = json.loads((root / 'installer-test-result.json').read_text(encoding='utf-8-sig'))
+          assert installed['ok'] and installed['persistentProjectsReopened'] >= 1
+          assert installed['installedAnimationPreview']['changed'] and installed['installedAnimationPreview']['played']
+          assert installed['installedExport']['status'] == 'completed'
+          print('Zorunlu ASR, kurulu uygulama, animasyon, export ve SQLite kanıtları doğrulandı.')
+          PY
+      - name: Gerçek dosyaları Google Drive resumable upload ile yükle
+        env:
+          NEDENMIS_DRIVE_UPLOAD_SESSIONS: ${{ secrets.NEDENMIS_DRIVE_UPLOAD_SESSIONS }}
+        run: |
+          python -m unittest scripts/test_drive_upload_release.py
+          python scripts/drive_upload_release.py \
+            --directory release-source \
+            --output release-drive/drive-upload-result.json \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --files NedenmisStudio-Setup.exe NedenmisStudio-Portable.zip build-manifest.json installer-test-result.json turkish-quality-result.json installed-turkish.wav installed-four-scenes.mp4
+      - name: Drive bağlantılarını PR raporuna yaz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list --head "$SOURCE_BRANCH" --state all --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then gh pr comment "$PR_NUMBER" --body-file release-drive/drive-upload-result.md; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NedenmisStudio-Drive-Yukleme-Kanitlari
+          path: |
+            source-run.json
+            source-release.json
+            release-drive/*.json
+            release-drive/*.md
+          if-no-files-found: warn
