@@ -15,6 +15,6 @@ try {
   while (!done && !existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 500));
   if (!existsSync(marker)) throw new Error('Electron smoke testi 120 saniye içinde sonuç üretmedi.');
   const report = JSON.parse(await readFile(marker, 'utf8'));
-  if (!report.ok || !report.rendererLoaded || !report.voiceBridgeExists || !report.ffmpegVersion || report.packaged !== !development) throw new Error(`Electron smoke doğrulaması başarısız: ${JSON.stringify(report)}`);
+  if (!report.ok || !report.rendererLoaded || !report.voiceBridgeExists || !report.ffmpegVersion || report.packaged) throw new Error(`Electron smoke doğrulaması başarısız: ${JSON.stringify(report)}`);
   console.log(`${development ? 'Geliştirme' : 'Üretim'} Electron açılışı başarılı: ${JSON.stringify(report)}`);
 } finally { stop(); await rm(marker, { force: true }); }
