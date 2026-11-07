@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       drive_upload_only:
-        description: 'Başarılı bir run’ın mevcut Release dosyalarını yalnızca Drive’a yükle'
+        description: 'Testleri geçen run’ın artefaktlarından eksik Release’i tamamla ve Drive’a yükle'
         required: false
         default: false
         type: boolean
@@ -232,7 +232,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Başarılı kaynak run ve Release bütünlüğünü doğrula
+      - name: Test run’ını ve artefakt bütünlüğünü doğrula
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
@@ -241,27 +241,38 @@ jobs:
           set -euo pipefail
           test -n "$SOURCE_RUN_ID"
           echo "SOURCE_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
-          gh run view "$SOURCE_RUN_ID" --json status,conclusion,headSha,headBranch,number,url > source-run.json
+          gh run view "$SOURCE_RUN_ID" --json status,conclusion,headSha,headBranch,number,url,jobs > source-run.json
           python - <<'PY'
           import json, os
           run = json.load(open('source-run.json', encoding='utf-8'))
-          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'Kaynak Windows production run başarılı değil.'
+          assert run['status'] == 'completed', 'Kaynak Windows production run tamamlanmamış.'
           assert run['headBranch'] == os.environ['EXPECTED_BRANCH'], 'Kaynak run manuel işin branchiyle eşleşmiyor.'
-          print(f"Doğrulanmış kaynak: {run['url']} · {run['headSha']}")
+          job = next(item for item in run['jobs'] if item['name'] == 'windows-production')
+          steps = job['steps']
+          required = [
+              'Bağımlılıklar', 'Electron runtime doğrulaması', 'Statik kontroller ve standart testler',
+              'Üretim derlemesi', 'Geliştirme Electron açılışı', 'Üretim Electron açılışı',
+              'Gerçek sentetik konuşmacı referansı', 'Resmî Türkçe V3 referansını test ortamına al',
+              'Gerçek Chatterbox V3 Türkçe klonlama ve video testi', 'Bağımsız Türkçe ASR anlaşılırlık kapısı',
+              'Windows x64 NSIS kurucusu', 'Taşınabilir ZIP', 'Kur, terminalsiz aç ve SQLite doğrula',
+              'Kurulu uygulama WAV/MP4 kanıtlarını topla', 'Kurulum boyutları ve SHA-256 manifesti',
+              'Test ve ses/video kanıtlarını paketle',
+          ]
+          for name in required:
+              assert any(step['name'] == name and step['conclusion'] == 'success' for step in steps), f'Zorunlu test adayı başarısız/eksik: {name}'
+          failures = [step['name'] for step in steps if step['conclusion'] == 'failure']
+          assert all(name == 'GitHub Release' for name in failures), f'Release dışında başarısız adım var: {failures}'
+          assert sum(step['name'] == 'Run actions/upload-artifact@v4' and step['conclusion'] == 'success' for step in steps) >= 2
+          print(f"Doğrulanmış test run’ı: {run['url']} · {run['headSha']} · Release dışındaki kapılar başarılı")
           PY
           SOURCE_TAG="windows-v1.1.0-build$(python -c "import json; print(json.load(open('source-run.json'))['number'])")"
           echo "SOURCE_TAG=$SOURCE_TAG" >> "$GITHUB_ENV"
-          python -c "import json,os; print('SOURCE_HEAD_SHA='+json.load(open('source-run.json'))['headSha'])" >> "$GITHUB_ENV"
+          python -c "import json; print('SOURCE_HEAD_SHA='+json.load(open('source-run.json'))['headSha'])" >> "$GITHUB_ENV"
           python -c "import json; print('SOURCE_BRANCH='+json.load(open('source-run.json'))['headBranch'])" >> "$GITHUB_ENV"
-          gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json
-          python - <<'PY'
-          import json, os
-          run = json.load(open('source-run.json', encoding='utf-8'))
-          release = json.load(open('source-release.json', encoding='utf-8'))
-          assert release['targetCommitish'] == run['headSha'], 'Release hedef commiti kaynak run ile eşleşmiyor.'
-          print(f"Doğrulanmış Release: {release['url']}")
-          PY
-          gh release download "$SOURCE_TAG" --dir release-source
+          gh run download "$SOURCE_RUN_ID" -n NedenmisStudio-Windows-x64 -D release-source
+          gh run download "$SOURCE_RUN_ID" -n NedenmisStudio-Windows-Test-Kanitlari -D release-evidence
+          cp release-evidence/Kurulu-Uygulama-Testi/installed-turkish.wav release-source/installed-turkish.wav
+          cp release-evidence/Kurulu-Uygulama-Testi/installed-four-scenes.mp4 release-source/installed-four-scenes.mp4
           python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
@@ -287,6 +298,46 @@ jobs:
           assert installed['installedExport']['status'] == 'completed'
           print('Zorunlu ASR, kurulu uygulama, animasyon, export ve SQLite kanıtları doğrulandı.')
           PY
+      - name: Eksik Release’i doğrulanmış artefaktlardan oluştur veya mevcut Release’i doğrula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json 2>release-lookup.log; then
+            assets=(
+              release-source/NedenmisStudio-Setup.exe
+              release-source/NedenmisStudio-Portable.zip
+              release-source/installer-test-result.json
+              release-source/chatterbox-test-result.json
+              release-source/turkish-quality-result.json
+              release-source/turkish-quality-source-result.json
+              release-source/build-manifest.json
+              release-source/installed-turkish.wav
+              release-source/installed-four-scenes.mp4
+            )
+            mapfile -d '' -t videos < <(find release-evidence/exports -maxdepth 1 -type f -name '*.mp4' -print0)
+            assets+=("${videos[@]}")
+            set +e
+            gh release create "$SOURCE_TAG" "${assets[@]}" \
+              --target "$SOURCE_HEAD_SHA" \
+              --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build ${SOURCE_TAG##*build}" \
+              --notes "Gerçek Chatterbox Multilingual V3 A/B, bağımsız Türkçe ASR, dört sahneli 1080x1920/30 FPS MP4, altyazı, SQLite, sessiz NSIS kurulumu, terminalsiz açılış ve kurulu uygulama animasyon/WAV/MP4 kapıları doğrulandı. Dosyalar başarılı test run’ının SHA-256 doğrulanmış artefaktlarıdır. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model birkaç GB olduğu için ilk kullanımda Ses Stüdyosu'ndan indirilir." > release-recovery.log 2>&1
+            code=$?
+            set -e
+            cat release-recovery.log
+            if [ "$code" -ne 0 ]; then exit "$code"; fi
+            gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json
+          fi
+          python - <<'PY'
+          import json
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          release = json.load(open('source-release.json', encoding='utf-8'))
+          assert release['targetCommitish'] == run['headSha'], 'Release hedef commiti test run’ı ile eşleşmiyor.'
+          names = {asset['name'] for asset in release['assets']}
+          required = {'NedenmisStudio-Setup.exe', 'NedenmisStudio-Portable.zip', 'build-manifest.json', 'turkish-quality-result.json', 'installed-turkish.wav', 'installed-four-scenes.mp4'}
+          assert required <= names, f'Release assetleri eksik: {required - names}'
+          print(f"Doğrulanmış Release: {release['url']}")
+          PY
       - name: Gerçek dosyaları Google Drive resumable upload ile yükle
         env:
           NEDENMIS_DRIVE_UPLOAD_SESSIONS: ${{ secrets.NEDENMIS_DRIVE_UPLOAD_SESSIONS }}
@@ -303,6 +354,16 @@ jobs:
         run: |
           PR_NUMBER=$(gh pr list --head "$SOURCE_BRANCH" --state all --json number --jq '.[0].number // empty')
           if [ -n "$PR_NUMBER" ]; then gh pr comment "$PR_NUMBER" --body-file release-drive/drive-upload-result.md; fi
+      - name: Kurtarma hatasını PR raporuna yaz
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$SOURCE_BRANCH" ] && [ -f release-recovery.log ]; then
+            PR_NUMBER=$(gh pr list --head "$SOURCE_BRANCH" --state all --json number --jq '.[0].number // empty')
+            { echo '## Release/Drive kurtarma hatası'; echo; echo '```text'; tail -c 30000 release-recovery.log; echo; echo '```'; } > release-recovery-failure.md
+            if [ -n "$PR_NUMBER" ]; then gh pr comment "$PR_NUMBER" --body-file release-recovery-failure.md; fi
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -310,6 +371,9 @@ jobs:
           path: |
             source-run.json
             source-release.json
+            release-lookup.log
+            release-recovery.log
+            release-recovery-failure.md
             release-drive/*.json
             release-drive/*.md
           if-no-files-found: warn
