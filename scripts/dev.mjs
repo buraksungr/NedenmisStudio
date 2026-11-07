@@ -12,4 +12,5 @@ for (let i = 0; i < 60; i += 1) { try { const response = await fetch('http://127
 if (!ready) { console.error('Vite başlatılamadı.'); vite.kill(); process.exit(1); }
 const electron = spawn(process.platform === 'win32' ? 'node_modules/electron/dist/electron.exe' : 'node_modules/electron/dist/electron', ['.'], { stdio: 'inherit', env: { ...process.env, VITE_DEV_SERVER_URL: 'http://localhost:5173' } }); processes.push(electron);
 function shutdown() { for (const child of processes) child.kill(); void main.dispose(); void preload.dispose(); }
+electron.on('error', (error) => { console.error('Electron başlatılamadı:', error); shutdown(); process.exit(1); });
 electron.on('exit', () => { shutdown(); process.exit(); }); process.on('SIGINT', () => { shutdown(); process.exit(); }); process.on('SIGTERM', () => { shutdown(); process.exit(); });

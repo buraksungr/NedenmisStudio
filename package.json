@@ -11,13 +11,13 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "predev": "electron-builder install-app-deps",
+    "predev": "node scripts/ensure-electron.mjs && electron-builder install-app-deps",
     "dev": "node scripts/dev.mjs",
     "dev:renderer": "vite --host 0.0.0.0",
     "build": "node scripts/build.mjs && npm run typecheck",
     "build:main": "node scripts/build.mjs --main-only",
     "build:renderer": "vite build",
-    "prestart": "electron-builder install-app-deps",
+    "prestart": "node scripts/ensure-electron.mjs && electron-builder install-app-deps",
     "start": "electron .",
     "preview": "vite --host 0.0.0.0",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",

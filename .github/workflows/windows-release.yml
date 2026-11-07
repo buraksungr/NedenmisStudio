@@ -17,6 +17,8 @@ jobs:
           cache: npm
       - name: Bağımlılıklar
         run: npm ci
+      - name: Electron runtime doğrulaması
+        run: node scripts/ensure-electron.mjs
       - name: Statik kontroller ve standart testler
         run: |
           npm run typecheck
