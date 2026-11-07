@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 const development = process.argv.includes('--dev'); const marker = join(tmpdir(), `nedenmis-smoke-${Date.now()}.json`);
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const child = spawn(npm, [development ? 'run' : 'start', ...(development ? ['dev'] : [])], { cwd: process.cwd(), env: { ...process.env, NEDENMIS_SMOKE_TEST: marker }, stdio: 'inherit', windowsHide: false });
+const child = spawn(npm, [development ? 'run' : 'start', ...(development ? ['dev'] : [])], { cwd: process.cwd(), env: { ...process.env, NEDENMIS_SMOKE_TEST: marker }, stdio: 'inherit', windowsHide: false, shell: process.platform === 'win32' });
 let done = false;
 function stop() { if (child.exitCode !== null) return; if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); else child.kill('SIGTERM'); }
 const deadline = Date.now() + 120000;
