@@ -1,0 +1,36 @@
+appId: studio.nedenmis.app
+productName: Nedenmiş Studio
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+  - assets/**/*
+asarUnpack:
+  - "**/*.node"
+  - "**/ffmpeg*"
+  - "**/ffprobe*"
+npmRebuild: true
+extraResources:
+  - from: voice-engine
+    to: voice-engine
+    filter:
+      - "**/*.py"
+      - "**/*.txt"
+      - "**/*.md"
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: NedenmisStudio-Setup.${ext}
+  executableName: NedenmisStudio
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Nedenmiş Studio
+publish: null
