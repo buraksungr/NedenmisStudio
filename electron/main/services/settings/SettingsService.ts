@@ -2,7 +2,7 @@ import { DEFAULT_IDENTITY, DEFAULT_SUBTITLE_STYLE, DEFAULT_VOICE, defaultSetting
 import type { AppSettings, ChannelIdentity, ProviderPublicConfig } from '../../../../shared/types.js';
 import type { SettingsRepository } from '../../infrastructure/database/SettingsRepository.js';
 import type { CredentialStore } from '../../infrastructure/CredentialStore.js';
-import { CHATTERBOX_SOURCE_REVISION } from '../tts/ChatterboxSource.js';
+import { CHATTERBOX_DEPENDENCY_PROFILE, CHATTERBOX_SOURCE_REVISION } from '../tts/ChatterboxSource.js';
 
 const DEFINITIONS: ProviderPublicConfig[] = [
   { id: 'local-script', kind: 'llm', name: 'Yerel senaryo taslağı', configured: true, requiresKey: false, description: 'Anahtarsız yapısal taslak; web kaynağı olmadan olgu üretmez.', referenceVoiceSupported: false, commercialNote: 'Tamamen yerel, ek lisans gerektirmez.', local: true },
@@ -23,8 +23,8 @@ export class SettingsService {
   constructor(private readonly repository: SettingsRepository, private readonly credentials: CredentialStore, private readonly initialStorage: string) {}
   get(): AppSettings {
     const settings = this.repository.get<AppSettings>('app', defaultSettings(this.initialStorage));
-    const engine = this.repository.get<{ dependenciesInstalled?: boolean; sourceRevision?: string; modelDownloaded?: boolean }>('voice-engine-v3', {});
-    const providers = DEFINITIONS.map((definition) => ({ ...definition, configured: definition.id === 'chatterbox-multilingual-v3' ? Boolean(engine.dependenciesInstalled && engine.sourceRevision === CHATTERBOX_SOURCE_REVISION && engine.modelDownloaded) : !definition.requiresKey || this.credentials.has(definition.id) }));
+    const engine = this.repository.get<{ dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean }>('voice-engine-v3', {});
+    const providers = DEFINITIONS.map((definition) => ({ ...definition, configured: definition.id === 'chatterbox-multilingual-v3' ? Boolean(engine.dependenciesInstalled && engine.sourceRevision === CHATTERBOX_SOURCE_REVISION && engine.dependencyProfile === CHATTERBOX_DEPENDENCY_PROFILE && engine.modelDownloaded) : !definition.requiresKey || this.credentials.has(definition.id) }));
     return { ...settings, defaultVoice: { ...DEFAULT_VOICE, ...settings.defaultVoice }, providers };
   }
   update(patch: Partial<AppSettings>): AppSettings {

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$SetupPath)
+param([Parameter(Mandatory=$true)][string]$SetupPath, [string]$VoiceTestRoot = '')
 $ErrorActionPreference = 'Stop'
 $SetupPath = (Resolve-Path $SetupPath).Path
 Write-Host "Sessiz NSIS kurulumu: $SetupPath"
@@ -8,17 +8,33 @@ $exe = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Fi
 if (-not $exe) { throw 'Kurulan NedenmisStudio.exe bulunamadı.' }
 $marker = Join-Path $env:TEMP "nedenmis-installed-smoke-$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()).json"
 $env:NEDENMIS_SMOKE_TEST = $marker
+if ($VoiceTestRoot) {
+  $database = Join-Path $VoiceTestRoot 'storage\chatterbox-e2e.sqlite'
+  $reference = Join-Path $VoiceTestRoot 'sapi-reference.wav'
+  if (-not (Test-Path $database) -or -not (Test-Path $reference)) { throw 'Kurulu uygulama ses testi için kaynak E2E veritabanı ve referans WAV gereklidir.' }
+  $env:NEDENMIS_SMOKE_USER_DATA = $VoiceTestRoot
+  $env:NEDENMIS_SMOKE_DATABASE = $database
+  $env:NEDENMIS_SMOKE_REFERENCE = $reference
+}
 Write-Host "Kurulu uygulama terminal/Vite olmadan açılıyor: $($exe.FullName)"
 $process = Start-Process -FilePath $exe.FullName -PassThru
-$deadline = [DateTime]::UtcNow.AddSeconds(90)
+$deadline = if ($VoiceTestRoot) { [DateTime]::UtcNow.AddMinutes(30) } else { [DateTime]::UtcNow.AddSeconds(90) }
 while (-not (Test-Path $marker) -and [DateTime]::UtcNow -lt $deadline -and -not $process.HasExited) { Start-Sleep -Milliseconds 500 }
 if (-not (Test-Path $marker)) { if (-not $process.HasExited) { $process.Kill() }; throw 'Kurulu uygulama smoke sonucu üretmedi.' }
 $report = Get-Content $marker -Raw | ConvertFrom-Json
 if (-not $report.ok -or -not $report.packaged -or -not $report.rendererLoaded -or -not $report.voiceBridgeExists -or -not $report.ffmpegVersion) { throw "Kurulu uygulama doğrulaması başarısız: $($report | ConvertTo-Json -Compress)" }
 if (-not (Test-Path $report.database)) { throw "SQLite veritabanı oluşturulamadı: $($report.database)" }
+$voiceResult = $null
+if ($VoiceTestRoot) {
+  $voice = $report.installedVoice
+  if (-not $voice -or $voice.providerId -ne 'chatterbox-multilingual-v3' -or $voice.checkpoint -ne 't3_mtl23ls_v3.safetensors' -or $voice.device -ne 'cpu' -or -not $voice.referenceSha256 -or $voice.generationSeconds -le 0 -or $voice.duration -le 0.5 -or -not (Test-Path $voice.audioPath)) { throw "Kurulu uygulamada gerçek V3 klonlama doğrulanamadı: $($report | ConvertTo-Json -Depth 6 -Compress)" }
+  if ($report.projectCount -lt 1) { throw 'Kurulu uygulama kaynak E2E projelerini SQLite üzerinden geri açamadı.' }
+  $voiceResult = $voice
+}
 $process.WaitForExit(10000) | Out-Null
 if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 2; if (-not $process.HasExited) { $process.Kill() } }
-$result = @{ ok=$true; installedExecutable=$exe.FullName; installer=$SetupPath; launchWithoutTerminal=$true; sqliteCreated=$true; ffmpeg=$report.ffmpegVersion; voiceBridge=$report.voiceBridgeExists; userData=$report.userData; testedAt=[DateTime]::UtcNow.ToString('o') }
+$persistentProjects = if ($VoiceTestRoot) { $report.projectCount } else { $null }
+$result = @{ ok=$true; installedExecutable=$exe.FullName; installer=$SetupPath; launchWithoutTerminal=$true; sqliteCreated=$true; persistentProjectsReopened=$persistentProjects; ffmpeg=$report.ffmpegVersion; voiceBridge=$report.voiceBridgeExists; installedVoice=$voiceResult; userData=$report.userData; testedAt=[DateTime]::UtcNow.ToString('o') }
 $result | ConvertTo-Json -Depth 4 | Set-Content -Path 'release/installer-test-result.json' -Encoding UTF8
 Remove-Item $marker -Force -ErrorAction SilentlyContinue
 Write-Host "Kurulu uygulama testi başarılı: $($result | ConvertTo-Json -Compress)"

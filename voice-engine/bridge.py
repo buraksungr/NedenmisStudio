@@ -44,8 +44,12 @@ def command_status(_: argparse.Namespace) -> None:
     import torch
     import torchaudio
     from chatterbox import mtl_tts
+    import perth
     from importlib.metadata import version
 
+    watermarker_ready = callable(getattr(perth, "PerthImplicitWatermarker", None))
+    if watermarker_ready:
+        perth.PerthImplicitWatermarker(device="cpu")
     v3_supported = (
         "t3_model" in inspect.signature(mtl_tts.ChatterboxMultilingualTTS.from_local).parameters
         and getattr(mtl_tts, "MULTILINGUAL_T3_MODELS", {}).get("v3") == "t3_mtl23ls_v3.safetensors"
@@ -57,6 +61,7 @@ def command_status(_: argparse.Namespace) -> None:
         torchaudio=torchaudio.__version__,
         chatterbox=version("chatterbox-tts"),
         v3_supported=v3_supported,
+        watermarker_ready=watermarker_ready,
         cuda=bool(torch.cuda.is_available()),
         platform=platform.platform(),
     )
@@ -169,8 +174,9 @@ def command_worker(args: argparse.Namespace) -> None:
             request_id = str(request.get("id", "unknown"))
             worker.synthesize(request)
         except Exception as error:  # Worker can remain available for the next scene.
+            detail = traceback.format_exc()
             traceback.print_exc(file=sys.stderr)
-            emit("error", id=request_id, message=str(error))
+            emit("error", id=request_id, message=str(error), traceback=detail[-12000:])
 
 
 def main() -> None:
@@ -190,8 +196,9 @@ def main() -> None:
         else:
             command_worker(args)
     except Exception as error:
+        detail = traceback.format_exc()
         traceback.print_exc(file=sys.stderr)
-        emit("fatal", message=str(error))
+        emit("fatal", message=str(error), traceback=detail[-12000:])
         raise SystemExit(1) from error
 
 
