@@ -11,6 +11,10 @@ on:
         description: 'Başarıyla tamamlanmış Windows production run ID'
         required: false
         type: string
+      drive_upload_sessions:
+        description: 'Özel repo için tek kullanımlık Drive oturum JSON’u; loglanmaz'
+        required: false
+        type: string
   pull_request:
     branches: [main]
 permissions:
@@ -340,7 +344,7 @@ jobs:
           PY
       - name: Gerçek dosyaları Google Drive resumable upload ile yükle
         env:
-          NEDENMIS_DRIVE_UPLOAD_SESSIONS: ${{ secrets.NEDENMIS_DRIVE_UPLOAD_SESSIONS }}
+          NEDENMIS_DRIVE_UPLOAD_SESSIONS: ${{ inputs.drive_upload_sessions }}
         run: |
           python -m unittest scripts/test_drive_upload_release.py
           python scripts/drive_upload_release.py \
