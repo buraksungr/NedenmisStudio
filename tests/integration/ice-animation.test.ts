@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -57,8 +58,13 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
     const probe = await ffmpeg.probe(record.outputPath);
     expect(probe).toMatchObject({ width: 1080, height: 1920, codec: 'h264' });
     expect(probe.duration).toBeGreaterThan(4.5); expect(probe.duration).toBeLessThan(5.1);
-    const streams = await execFileAsync(ffmpeg.ffprobePath, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,r_frame_rate,sample_rate', '-of', 'json', record.outputPath]);
+    const streams = await execFileAsync(ffmpeg.ffprobePath, ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,codec_name,r_frame_rate,avg_frame_rate,nb_read_frames,duration,sample_rate', '-of', 'json', record.outputPath]);
     expect(streams.stdout).toContain('"codec_name": "aac"'); expect(streams.stdout).toContain('"r_frame_rate": "30/1"');
+    const streamInfo = JSON.parse(streams.stdout) as { streams: { codec_type: string; nb_read_frames?: string; duration?: string; avg_frame_rate?: string }[] };
+    const videoStream = streamInfo.streams.find((stream) => stream.codec_type === 'video')!;
+    const expectedFrames = Math.round(totalDuration(project.scenes) * 30);
+    expect(videoStream.nb_read_frames).toBe(String(expectedFrames)); expect(videoStream.avg_frame_rate).toBe('30/1');
+    expect(Number(videoStream.duration)).toBeCloseTo(expectedFrames / 30, 2);
     const starts = sceneStartTimes(project.scenes);
     project.scenes.forEach((scene, index) => {
       expect(scene.narrationDuration).toBe(1);
@@ -77,7 +83,8 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
       const frames: Buffer[] = [];
       for (let sample = 0; sample < 2; sample += 1) {
         const path = join(directory, `ice-motion-${index}-${sample}.png`);
-        await ffmpeg.run(`ice-extract-${index}-${sample}`, ['-i', record.outputPath, '-ss', String(times[sample]), '-frames:v', '1', '-vf', 'crop=920:1000:80:420,scale=460:500', '-f', 'image2', path]);
+        const extraction = await execFileAsync(ffmpeg.ffmpegPath, ['-hide_banner', '-y', '-ss', String(times[sample]), '-i', record.outputPath, '-frames:v', '1', '-vf', 'crop=920:1000:80:420,scale=460:500', '-update', '1', path], { maxBuffer: 5 * 1024 * 1024 });
+        if (!existsSync(path)) throw new Error(`MP4 karesi oluşmadı (${index + 1}/${sample + 1}): ${extraction.stderr}`);
         frames.push(await objectPixels(path));
       }
       firstFrames.push(frames[0]);
@@ -92,7 +99,7 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
       status: 'passed',
       pipeline: 'Shared procedural SVG timeline → Sharp CPU RGBA frames → FFmpeg rawvideo/libx264',
       cameraMovement: 'static (pixel movement cannot come from zoom or pan)',
-      video: { width: probe.width, height: probe.height, codec: probe.codec, durationSeconds: probe.duration, fps: 30, audioCodec: 'aac' },
+      video: { width: probe.width, height: probe.height, codec: probe.codec, durationSeconds: probe.duration, fps: 30, audioCodec: 'aac', expectedFrames, decodedFrames: Number(videoStream.nb_read_frames), videoStreamDuration: Number(videoStream.duration) },
       narrationFixture: 'Four known-duration PCM signals; perceptual speech quality is not claimed by this test',
       scenes: sceneResults,
       subtitleTiming: 'Every cue is bounded by its scene; scene starts match narration mix offsets',

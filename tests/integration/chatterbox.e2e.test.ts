@@ -85,6 +85,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       narrated.scenes.forEach((scene, index) => scene.subtitles.forEach((cue) => {
         expect(cue.start).toBeGreaterThanOrEqual(starts[index]); expect(cue.end).toBeLessThanOrEqual(starts[index] + scene.duration + .01);
       }));
+      context.voiceEngine.close(); // Release several GB of model tensors before CPU rendering.
       const visualized = await context.visuals.generateAll(narrated.id); expect(visualized.scenes.every((scene) => scene.assetPath && existsSync(scene.assetPath))).toBe(true);
       context.settings.update({ exportPreset: 'standard', outputPath: join(storage, 'exports') });
       const record = await context.render.start(visualized.id); const deadline = Date.now() + 600000;
@@ -92,11 +93,16 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       const exported = context.exports.get(record.id); expect(exported.error).toBeUndefined(); expect(exported.status).toBe('completed');
       const video = await context.ffmpeg.probe(exported.outputPath); expect(video.width).toBe(1080); expect(video.height).toBe(1920); expect(video.codec).toBe('h264');
       expect(Math.abs(video.duration - totalDuration(visualized.scenes))).toBeLessThan(.5); expect(existsSync(exported.outputPath)).toBe(true);
-      const streams = await execFileAsync(context.ffmpeg.ffprobePath, ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,r_frame_rate,sample_rate,channels', '-of', 'json', exported.outputPath]);
+      const streams = await execFileAsync(context.ffmpeg.ffprobePath, ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,codec_name,r_frame_rate,avg_frame_rate,nb_read_frames,duration,sample_rate,channels', '-of', 'json', exported.outputPath]);
       expect(streams.stdout).toContain('"r_frame_rate": "30/1"'); expect(streams.stdout).toContain('"codec_name": "aac"');
+      const streamInfo = JSON.parse(streams.stdout) as { streams: { codec_type: string; nb_read_frames?: string; duration?: string; avg_frame_rate?: string }[] };
+      const videoStream = streamInfo.streams.find((stream) => stream.codec_type === 'video')!;
+      const expectedFrames = Math.round(totalDuration(visualized.scenes) * 30);
+      expect(videoStream.nb_read_frames).toBe(String(expectedFrames)); expect(videoStream.avg_frame_rate).toBe('30/1');
+      expect(Number(videoStream.duration)).toBeCloseTo(expectedFrames / 30, 1);
       for (let index = 0; index < 4; index += 1) {
         const framePath = join(storage, 'previews', `exported-scene-${index + 1}.png`);
-        await context.ffmpeg.run(`exported-frame-${index}`, ['-i', exported.outputPath, '-ss', String(starts[index] + Math.min(1, visualized.scenes[index].duration / 3)), '-frames:v', '1', '-vf', 'scale=540:960', framePath]);
+        await context.ffmpeg.run(`exported-frame-${index}`, ['-ss', String(starts[index] + Math.min(1, visualized.scenes[index].duration / 3)), '-i', exported.outputPath, '-frames:v', '1', '-vf', 'scale=540:960', '-update', '1', framePath]);
         expect(existsSync(framePath)).toBe(true);
       }
       qualityCases.push({ id: 'turkish-four-scene-exported-mp4', audio: exported.outputPath, text: SCENE_TEXTS.join(' '), required: true });

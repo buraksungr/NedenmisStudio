@@ -22,7 +22,7 @@ Görsel kontrolde ilk kristal bağlarının altıgen yerine yıldız oluşturdu�
 
 Proje: **Why does ice float on water?** — dört farklı sahne, statik kamera, bilinen süreli PCM fixture'ları. Bu fixture konuşma kalitesi testi değildir.
 
-- MP4: 1080×1920, 30 FPS, H.264/AAC, 4.822 saniye.
+- MP4: 1080×1920, 30 FPS, H.264/AAC, 4.822 saniye; `-count_frames` ile **144/144 video karesi** ve 4.800 saniye video stream süresi doğrulandı.
 - Statik kamerada iki farklı zamanın ortalama piksel farkı:
   - liquid: 7.4062
   - crystallization: 10.4544
