@@ -43,6 +43,23 @@ Türkçe fixture resmî demonun `tr_m.flac` dosyasıdır ve yalnızca geçici CI
 
 Zorunlu örneklerde eşikler **CER ≤ 0.20**, **WER ≤ 0.35** ve boş olmayan transkripttir. Hem kaynak kodlu test hem kurulu uygulama testi bu kapıdan geçmeden release oluşmaz. ASR sonucu anlaşılırlık kanıtıdır; insan dinlemesi, doğal prozodi veya konuşmacı benzerliği kanıtı değildir.
 
-## Sonuç durumu
+## Gerçek model A/B + ASR sonucu — run 42417951334
 
-Bu dokümandaki kaynak farkları ve kod değişiklikleri doğrulanmıştır. **Türkçe bozulmanın kesin kök nedeni, gerçek model A/B + ASR sonuçları okunmadan ilan edilmez.** Kesin sonuç, transkriptler, CER/WER değerleri, kurulu uygulama sonucu ve release bağlantıları CI tamamlandıktan sonra bu rapora ve teslim özetine eklenmelidir.
+Bağımsız `faster-whisper large-v3-turbo` (CPU/int8, forced `tr`) sonuçları:
+
+| Örnek | CER | WER | Sonuç |
+|---|---:|---:|---|
+| Build 10 lowercase + İngilizce SAPI referans | 0.0000 | 0.0000 | Geçti |
+| V3 fullcase + aynı İngilizce referans | 0.0000 | 0.0000 | Geçti |
+| Build 10 lowercase + Türkçe referans | 0.0000 | 0.0000 | Geçti |
+| V3 fullcase + aynı Türkçe referans | 0.0000 | 0.0000 | Geçti |
+| Doğal uzun Türkçe metin, provider + FFmpeg yolu | 0.0000 | 0.0000 | Geçti |
+| Dört sahneli export MP4/AAC | 0.0000 | 0.0000 | Geçti |
+
+Dört A/B koşulunda da `[tr]` token ID'si **712** ve ilk tokenda bulundu; `[UNK] = 0`. Fullcase, beklenen şekilde ilk `Buz` içerik tokenını lowercase `15` yerine `278` yaptı; diğer tokenlar aynı kaldı. Seed `20261107` ile kısa A/B metni dört koşulda da bağımsız ASR tarafından doğru transcribe edildi. Uzun doğal metin ve dört sahneli videonun tamamı da doğru transcribe edildi. Noktalama farkları normalize skorlamada cezalandırılmadı.
+
+**Kök neden çıkarımı:** Bu deney `NFKD,fullcase`in veya Türkçe referansın rastgele-hece sorununu düzelttiğini göstermiyor; Build 10 lowercase + İngilizce referans da aynı ölçümde kusursuzdu. Kullanıcının orijinal bozuk MP4'si mevcut olmadığından sorun bu kontrollü metin/seed/model koşullarında yeniden üretilemedi ve kesin kök neden hâlâ bilinmiyor. Fullcase, resmî V3 profiliyle uyum için korunuyor; bir kalite düzeltmesi olarak ilan edilmiyor. Tek bir metin/seed ve ASR, bütün olası sampling bozukluklarını veya doğal prozodiyi dışlamaz. İnsan dinlemesi yapılmadı.
+
+Kaynak video 1080×1920, 30 FPS, **645/645 kare**, 21.5 saniye H.264 ve 48 kHz stereo AAC ölçüldü; altyazı sınırları ve SQLite kalıcılığı geçti. Bu run'da üretim ve ASR tamamlanmasına rağmen testin en sonunda DB kapatıldıktan sonra settings okunması test sıralama hatası verdi; release ve kurulu uygulama aşaması çalışmadı. Assertion DB açıkken yapılacak şekilde düzeltildi ve sonraki run'da yeniden doğrulanacak.
+
+Ham transkript ve token kanıtı: [PR kalite yorumu](https://github.com/buraksungr/NedenmisStudio/pull/1#issuecomment-6713785237).

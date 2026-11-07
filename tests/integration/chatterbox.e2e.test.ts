@@ -83,6 +83,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
         subtitles: generateSubtitleCues(narration, 6, index * 6), subtitleTiming: 'estimated', status: 'empty',
       })); context.projects.update(project);
       const narrated = await context.tts.generateProject(project.id);
+      expect(context.settings.get().activeTtsProvider).toBe('chatterbox-multilingual-v3');
       expect(narrated.voice.providerId).toBe('chatterbox-multilingual-v3'); expect(narrated.scenes).toHaveLength(4);
       expect(narrated.scenes.every((scene) => scene.narrationPath && scene.narrationDuration! > .5)).toBe(true);
       expect(narrated.scenes.every((scene) => scene.duration >= scene.narrationDuration!)).toBe(true);
@@ -132,7 +133,6 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       }
       if (process.env.NEDENMIS_CHATTERBOX_RESULT) { await mkdir(dirname(process.env.NEDENMIS_CHATTERBOX_RESULT), { recursive: true }); await writeFile(process.env.NEDENMIS_CHATTERBOX_RESULT, JSON.stringify(result, null, 2), 'utf8'); }
       console.log(JSON.stringify(result, null, 2));
-      expect(context.settings.get().activeTtsProvider).toBe('chatterbox-multilingual-v3');
     } finally { context.voiceEngine.close(); try { context.database.close(); } catch { /* Already reopened in persistence test. */ } }
   }, 7_200_000);
 });
