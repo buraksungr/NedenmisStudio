@@ -16,6 +16,13 @@ import time
 import traceback
 import wave
 
+# Windows embedded Python otherwise defaults pipes to CP1252. NFKD diagnostics
+# contain combining characters and must never abort an otherwise valid generation.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 REPO_ID = "ResembleAI/chatterbox"
 # V3 model + tokenizer + decoder are one reproducible bundle, not a moving `main` alias.
 MODEL_REVISION = "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
@@ -30,7 +37,7 @@ REQUIRED_FILES = [
 
 
 def emit(event: str, **payload: object) -> None:
-    print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
+    print(json.dumps({"event": event, **payload}, ensure_ascii=True), flush=True)
 
 
 def sha256(path: Path) -> str:
@@ -150,7 +157,7 @@ class Worker:
         seed = int(request.get("seed", 0))
         if seed:
             self.torch.manual_seed(seed)
-        emit("tokenization", language="tr", text_preprocessing="legacy-lowercase,NFKD" if legacy_lowercase else "NFKD,fullcase", normalized_text=normalized_text, decoded_text=decoded_text, token_count=len(token_ids), unknown_tokens=unknown_tokens, language_token_id=language_token_id, seed=seed)
+        emit("tokenization", language="tr", text_preprocessing="legacy-lowercase,NFKD" if legacy_lowercase else "NFKD,fullcase", normalized_text=normalized_text, decoded_text=decoded_text, token_count=len(token_ids), token_ids=token_ids, unknown_tokens=unknown_tokens, language_token_id=language_token_id, seed=seed)
         reference_hash = self.prepare_reference(reference, exaggeration)
         output.parent.mkdir(parents=True, exist_ok=True)
         emit("generation_started", language="tr", model="Chatterbox Multilingual V3")
@@ -195,6 +202,8 @@ class Worker:
             normalized_text=normalized_text,
             decoded_text=decoded_text,
             token_count=len(token_ids),
+            token_ids=token_ids,
+            language_token_id=language_token_id,
             unknown_tokens=unknown_tokens,
             seed=seed,
             torch=self.torch.__version__,

@@ -18,7 +18,7 @@ const RUNTIME_FILES = {
 } as const;
 const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
 interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string }
-export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string; sampleRate: number; channels: number; modelRevision: string; textPreprocessing: string; normalizedText: string; decodedText: string; tokenCount: number; unknownTokens: number; seed: number }
+export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string; sampleRate: number; channels: number; modelRevision: string; textPreprocessing: string; normalizedText: string; decodedText: string; tokenCount: number; tokenIds: number[]; languageTokenId: number; unknownTokens: number; seed: number }
 interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number; seed?: number; legacyLowercase?: boolean }
 
 function friendlyProcessError(message: string): string {
@@ -121,7 +121,7 @@ export class VoiceEngineManager {
   }
   private run(command: string, args: string[], stage: VoiceEngineProgress['stage'], extraEnv: NodeJS.ProcessEnv = {}): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = spawn(command, args, { windowsHide: true, env: { ...process.env, HF_HOME: this.modelsRoot, ...extraEnv } }); let output = ''; let errors = '';
+      const child = spawn(command, args, { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8', HF_HOME: this.modelsRoot, ...extraEnv } }); let output = ''; let errors = '';
       child.stdout.on('data', (chunk: Buffer) => { const text = chunk.toString(); output = `${output}${text}`.slice(-80000); for (const line of text.split('\n').filter((item) => item.trim())) this.logger.info(`Voice engine ${stage}: ${line.trim().slice(0, 1000)}`); });
       child.stderr.on('data', (chunk: Buffer) => { const text = chunk.toString(); errors = `${errors}${text}`.slice(-40000); const line = text.trim().split('\n').filter(Boolean).at(-1); if (line) this.progress(stage, line.slice(0, 240)); });
       child.on('error', reject); child.on('close', (code) => code === 0 ? resolve(output) : reject(new Error(errors || output || `İşlem ${code} koduyla kapandı.`)));
@@ -145,7 +145,7 @@ export class VoiceEngineManager {
   private startWorker(snapshot: string): void {
     const memoryLimit = freemem() < 6 * 1024 ** 3 ? 2 : 4; const threads = Math.max(1, Math.min(memoryLimit, cpus().length)); this.workerStderr = ''; this.workerBuffer = '';
     this.progress('generation', `Chatterbox V3 CPU üzerinde yükleniyor · ${threads} iş parçacığı…`);
-    const child = spawn(this.python(), [this.bridge(), 'worker', '--snapshot', snapshot, '--threads', String(threads)], { windowsHide: true, env: { ...process.env, HF_HOME: this.modelsRoot, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_XET: '1' } });
+    const child = spawn(this.python(), [this.bridge(), 'worker', '--snapshot', snapshot, '--threads', String(threads)], { windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8', HF_HOME: this.modelsRoot, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_XET: '1' } });
     this.worker = child;
     child.stdout.on('data', (chunk: Buffer) => { this.workerBuffer += chunk.toString(); let index = this.workerBuffer.indexOf('\n'); while (index >= 0) { const line = this.workerBuffer.slice(0, index); this.workerBuffer = this.workerBuffer.slice(index + 1); this.handleWorkerLine(line); index = this.workerBuffer.indexOf('\n'); } });
     child.stderr.on('data', (chunk: Buffer) => { const text = chunk.toString(); this.workerStderr = `${this.workerStderr}${text}`.slice(-30000); const line = text.trim().split('\n').filter(Boolean).at(-1); if (line) this.progress('generation', line.replace(/\r/g, '').slice(0, 220)); });
@@ -157,7 +157,7 @@ export class VoiceEngineManager {
     try { event = JSON.parse(line) as Record<string, unknown>; } catch { this.logger.warn(`Chatterbox çıktısı: ${line.slice(0, 500)}`); return; }
     const type = String(event.event || '');
     if (type === 'result' && this.current) {
-      const generation: ChatterboxGeneration = { outputPath: String(event.output_path), duration: Number(event.duration), generationSeconds: Number(event.generation_seconds), modelLoadSeconds: Number(event.model_load_seconds), referenceSha256: String(event.reference_sha256), model: String(event.model), checkpoint: String(event.checkpoint), device: String(event.device), torch: String(event.torch), sampleRate: Number(event.sample_rate), channels: Number(event.channels), modelRevision: String(event.model_revision), textPreprocessing: String(event.text_preprocessing), normalizedText: String(event.normalized_text), decodedText: String(event.decoded_text), tokenCount: Number(event.token_count), unknownTokens: Number(event.unknown_tokens), seed: Number(event.seed) };
+      const generation: ChatterboxGeneration = { outputPath: String(event.output_path), duration: Number(event.duration), generationSeconds: Number(event.generation_seconds), modelLoadSeconds: Number(event.model_load_seconds), referenceSha256: String(event.reference_sha256), model: String(event.model), checkpoint: String(event.checkpoint), device: String(event.device), torch: String(event.torch), sampleRate: Number(event.sample_rate), channels: Number(event.channels), modelRevision: String(event.model_revision), textPreprocessing: String(event.text_preprocessing), normalizedText: String(event.normalized_text), decodedText: String(event.decoded_text), tokenCount: Number(event.token_count), tokenIds: Array.isArray(event.token_ids) ? event.token_ids.map(Number) : [], languageTokenId: Number(event.language_token_id), unknownTokens: Number(event.unknown_tokens), seed: Number(event.seed) };
       this.saveState({ verifiedAt: new Date().toISOString(), lastGenerationSeconds: generation.generationSeconds, lastReferenceSha256: generation.referenceSha256 }); this.current.resolve(generation); this.current = undefined;
     } else if (type === 'error' && this.current) { this.current.reject(workerError(event, 'Chatterbox sentezi başarısız.')); this.current = undefined; }
     else if (type === 'fatal' && this.current) { this.current.reject(workerError(event, 'Chatterbox worker başlatılamadı.')); this.current = undefined; }

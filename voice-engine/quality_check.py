@@ -15,6 +15,11 @@ import sys
 import unicodedata
 import wave
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+
 
 def normalized(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).casefold()
@@ -114,7 +119,7 @@ def main() -> None:
             "waveform": waveform(audio), "segments": segments,
             "required": required, "asrIntelligibilityPassed": passed,
         })
-        print(json.dumps(results[-1], ensure_ascii=False), flush=True)
+        print(json.dumps(results[-1], ensure_ascii=True), flush=True)
     failed = [item["id"] for item in results if item["required"] and not item["asrIntelligibilityPassed"]]
     report = {
         "ok": not failed,

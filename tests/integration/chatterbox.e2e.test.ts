@@ -9,6 +9,7 @@ import { AppDatabase } from '../../electron/main/infrastructure/database/Databas
 import { ProjectRepository } from '../../electron/main/infrastructure/database/ProjectRepository.js';
 import { generateSubtitleCues, id, sceneStartTimes, totalDuration } from '../../shared/index.js';
 import type { AnimationPreset, Scene } from '../../shared/types.js';
+import { createPartialDiagnosticsWriter, type TurkishAbDiagnostic, type TurkishQualityCase } from '../fixtures/chatterboxDiagnostics.js';
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env.NEDENMIS_CHATTERBOX_E2E === '1';
@@ -25,8 +26,10 @@ const SCENE_TEXTS = [
 describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne doğrulaması', () => {
   it('ön işleme/referans A/B, doğal Türkçe, animasyonlu MP4, altyazı ve kalıcılık', async () => {
     const storage = resolve(process.env.NEDENMIS_CHATTERBOX_STORAGE || join(process.cwd(), '.chatterbox-test-storage')); await mkdir(storage, { recursive: true });
-    const qualityCases: { id: string; audio: string; text: string; required: boolean }[] = [];
-    const abDiagnostics: unknown[] = [];
+    const qualityCases: TurkishQualityCase[] = [];
+    const abDiagnostics: TurkishAbDiagnostic[] = [];
+    const persistPartialDiagnostics = createPartialDiagnosticsWriter(process.env.NEDENMIS_TURKISH_QUALITY_MANIFEST, process.env.NEDENMIS_CHATTERBOX_RESULT);
+    const savePartialDiagnostics = () => persistPartialDiagnostics(qualityCases, abDiagnostics);
     const { createAppContext } = await import('../../electron/main/services/AppContext.js');
     const context = createAppContext(storage, join(storage, 'chatterbox-e2e.sqlite'), () => undefined, join(process.cwd(), 'voice-engine'), (progress) => console.log(`[Chatterbox ${progress.stage}] ${progress.message}`));
     try {
@@ -55,11 +58,12 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       ] as const) {
         const outputPath = join(storage, 'previews', `${name}.wav`);
         const generated = await context.voiceEngine.synthesize({ id: id(name), text: AB_TEXT, referencePath, outputPath, exaggeration: .5, cfgWeight: .5, temperature: .8, seed: 20261107, legacyLowercase });
-        expect(generated.checkpoint).toBe('t3_mtl23ls_v3.safetensors'); expect(generated.sampleRate).toBe(24000); expect(generated.channels).toBe(1);
-        expect(generated.tokenCount).toBeGreaterThan(10); expect(generated.unknownTokens).toBe(0); expect(generated.decodedText).toContain('[tr]');
-        expect(generated.textPreprocessing).toBe(legacyLowercase ? 'legacy-lowercase,NFKD' : 'NFKD,fullcase');
-        abDiagnostics.push({ id: name, referenceSha256: generated.referenceSha256, duration: generated.duration, generationSeconds: generated.generationSeconds, normalizedText: generated.normalizedText, decodedText: generated.decodedText, tokenCount: generated.tokenCount, unknownTokens: generated.unknownTokens, seed: generated.seed });
+        abDiagnostics.push({ id: name, referenceSha256: generated.referenceSha256, duration: generated.duration, generationSeconds: generated.generationSeconds, normalizedText: generated.normalizedText, decodedText: generated.decodedText, tokenCount: generated.tokenCount, tokenIds: generated.tokenIds, languageTokenId: generated.languageTokenId, unknownTokens: generated.unknownTokens, seed: generated.seed });
         qualityCases.push({ id: name, audio: outputPath, text: AB_TEXT, required: name === 'v3-fullcase-turkish' });
+        await savePartialDiagnostics();
+        expect(generated.checkpoint).toBe('t3_mtl23ls_v3.safetensors'); expect(generated.sampleRate).toBe(24000); expect(generated.channels).toBe(1);
+        expect(generated.tokenCount).toBeGreaterThan(10); expect(generated.tokenIds).toHaveLength(generated.tokenCount); expect(generated.tokenIds[0]).toBe(generated.languageTokenId); expect(generated.unknownTokens).toBe(0); expect(generated.decodedText).toContain('[tr]');
+        expect(generated.textPreprocessing).toBe(legacyLowercase ? 'legacy-lowercase,NFKD' : 'NFKD,fullcase');
       }
 
       const preview = await context.tts.preview({ text: QUALITY_TEXT, selection: project.voice, referenceVoicePath: turkishReference.path });
@@ -68,6 +72,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       expect(preview.engine?.referenceSha256).toMatch(/^[a-f0-9]{64}$/); expect(preview.duration).toBeGreaterThan(.5); expect(existsSync(preview.path)).toBe(true);
       const qualityAudio = join(storage, 'previews', 'turkish-natural-v3-provider.wav'); await copyFile(preview.path, qualityAudio);
       qualityCases.push({ id: 'turkish-natural-v3-provider', audio: qualityAudio, text: QUALITY_TEXT, required: true });
+      await savePartialDiagnostics();
 
       const presets: AnimationPreset[] = ['liquid-molecules', 'crystallization', 'lattice-expansion', 'floating-ice'];
       project.scenes = SCENE_TEXTS.map((narration, index): Scene => ({
@@ -106,6 +111,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
         expect(existsSync(framePath)).toBe(true);
       }
       qualityCases.push({ id: 'turkish-four-scene-exported-mp4', audio: exported.outputPath, text: SCENE_TEXTS.join(' '), required: true });
+      await savePartialDiagnostics();
 
       const databasePath = join(storage, 'chatterbox-e2e.sqlite'); context.voiceEngine.close(); context.database.close();
       const reopened = new AppDatabase(databasePath); const persisted = new ProjectRepository(reopened).get(project.id);

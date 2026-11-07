@@ -73,8 +73,10 @@ jobs:
           type release\chatterbox-e2e.log
           exit /b %CODE%
       - name: Bağımsız Türkçe ASR anlaşılırlık kapısı
+        if: always()
         shell: pwsh
         run: |
+          if (-not (Test-Path release/turkish-quality-manifest.json)) { Write-Host 'Değerlendirilecek ses manifesti yok.'; exit 0 }
           $python = "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe"
           & $python -m pip install --only-binary=:all: faster-whisper==1.2.1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -128,6 +130,10 @@ jobs:
               $expected = ([string]$case.expectedText).Replace('|', '\|')
               $transcript = ([string]$case.transcript).Replace('|', '\|')
               $lines += "", "<details><summary>$($case.id) — transkript</summary>", "", "**Beklenen:** $expected", "", "**ASR:** $transcript", "", "</details>"
+            }
+            if (Test-Path release/turkish-ab-progress.json) {
+              $ab = Get-Content release/turkish-ab-progress.json -Raw | ConvertFrom-Json
+              foreach ($item in $ab) { $lines += "", "<details><summary>$($item.id) — tokenizer tanısı</summary>", "", "Seed: $($item.seed) · Süre: $($item.duration) s · Token: $($item.tokenCount) · UNK: $($item.unknownTokens) · [tr] ID: $($item.languageTokenId)", "", "Token IDs: $($item.tokenIds -join ', ')", "", "Normalized: $($item.normalizedText)", "", "Decoded: $($item.decodedText)", "", "</details>" }
             }
             [IO.File]::WriteAllText("$PWD/release/turkish-quality-summary.md", ($lines -join "`n"))
             if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/turkish-quality-summary.md }

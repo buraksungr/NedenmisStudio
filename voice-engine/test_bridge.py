@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -40,6 +41,7 @@ class BridgeTests(unittest.TestCase):
                 for name in module.REQUIRED_FILES:
                     target = Path(directory, name); target.parent.mkdir(parents=True, exist_ok=True); target.touch()
                 worker = module.Worker(types.SimpleNamespace(threads=1, snapshot=directory))
+        worker.test_module = module
         return worker
 
     def test_v3_preserves_case_and_nfkd_normalization_flag(self):
@@ -58,6 +60,16 @@ class BridgeTests(unittest.TestCase):
         worker.model.tokenizer.text_to_tokens = worker.v3_text_to_tokens
         worker.model.tokenizer.text_to_tokens("Build 11", language_id="tr", lowercase=True)
         self.assertEqual(worker.model.tokenizer.calls[-1]["lowercase"], False)
+
+    def test_nfkd_diagnostics_are_safe_on_cp1252_stdout(self):
+        module = self.load_worker().test_module
+        with tempfile.NamedTemporaryFile(mode="w+", encoding="cp1252") as stream:
+            with patch.object(module.sys, "stdout", stream):
+                module.emit("tokenization", decoded_text="Buz i\u0308c\u0327in ğüşöç")
+            stream.seek(0)
+            payload = stream.read()
+        self.assertIn("\\u0308", payload)
+        self.assertEqual(json.loads(payload)["decoded_text"], "Buz i\u0308c\u0327in ğüşöç")
 
     def test_pinned_model_revision_matches_typescript(self):
         python_source = Path(__file__).with_name("bridge.py").read_text(encoding="utf-8")
