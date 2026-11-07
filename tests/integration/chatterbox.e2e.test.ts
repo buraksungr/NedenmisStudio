@@ -97,7 +97,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
       expect(streams.stdout).toContain('"r_frame_rate": "30/1"'); expect(streams.stdout).toContain('"codec_name": "aac"');
       const streamInfo = JSON.parse(streams.stdout) as { streams: { codec_type: string; nb_read_frames?: string; duration?: string; avg_frame_rate?: string }[] };
       const videoStream = streamInfo.streams.find((stream) => stream.codec_type === 'video')!;
-      const expectedFrames = Math.round(totalDuration(visualized.scenes) * 30);
+      const expectedFrames = Math.max(1, Math.ceil(totalDuration(visualized.scenes) * 30 - 1e-9));
       expect(videoStream.nb_read_frames).toBe(String(expectedFrames)); expect(videoStream.avg_frame_rate).toBe('30/1');
       expect(Number(videoStream.duration)).toBeCloseTo(expectedFrames / 30, 1);
       for (let index = 0; index < 4; index += 1) {

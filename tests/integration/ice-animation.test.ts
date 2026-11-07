@@ -54,7 +54,9 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
       if (['completed', 'failed', 'cancelled'].includes(status)) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    const record = exports.get(started.id); expect(record.error).toBeUndefined(); expect(record.status).toBe('completed');
+    const record = exports.get(started.id);
+    if (process.env.NEDENMIS_ANIMATION_OUTPUT && existsSync(record.outputPath)) { await mkdir(dirname(process.env.NEDENMIS_ANIMATION_OUTPUT), { recursive: true }); await copyFile(record.outputPath, process.env.NEDENMIS_ANIMATION_OUTPUT); }
+    expect(record.error).toBeUndefined(); expect(record.status).toBe('completed');
     const probe = await ffmpeg.probe(record.outputPath);
     expect(probe).toMatchObject({ width: 1080, height: 1920, codec: 'h264' });
     expect(probe.duration).toBeGreaterThan(4.5); expect(probe.duration).toBeLessThan(5.1);
@@ -62,7 +64,7 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
     expect(streams.stdout).toContain('"codec_name": "aac"'); expect(streams.stdout).toContain('"r_frame_rate": "30/1"');
     const streamInfo = JSON.parse(streams.stdout) as { streams: { codec_type: string; nb_read_frames?: string; duration?: string; avg_frame_rate?: string }[] };
     const videoStream = streamInfo.streams.find((stream) => stream.codec_type === 'video')!;
-    const expectedFrames = Math.round(totalDuration(project.scenes) * 30);
+    const expectedFrames = Math.max(1, Math.ceil(totalDuration(project.scenes) * 30 - 1e-9));
     expect(videoStream.nb_read_frames).toBe(String(expectedFrames)); expect(videoStream.avg_frame_rate).toBe('30/1');
     expect(Number(videoStream.duration)).toBeCloseTo(expectedFrames / 30, 2);
     const starts = sceneStartTimes(project.scenes);
@@ -105,7 +107,6 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
       subtitleTiming: 'Every cue is bounded by its scene; scene starts match narration mix offsets',
       outputPath: process.env.NEDENMIS_ANIMATION_OUTPUT || undefined,
     };
-    if (process.env.NEDENMIS_ANIMATION_OUTPUT) { await mkdir(dirname(process.env.NEDENMIS_ANIMATION_OUTPUT), { recursive: true }); await copyFile(record.outputPath, process.env.NEDENMIS_ANIMATION_OUTPUT); }
     if (process.env.NEDENMIS_ANIMATION_RESULT) { await mkdir(dirname(process.env.NEDENMIS_ANIMATION_RESULT), { recursive: true }); await writeFile(process.env.NEDENMIS_ANIMATION_RESULT, JSON.stringify(result, null, 2), 'utf8'); }
     db.close();
   }, 240000);

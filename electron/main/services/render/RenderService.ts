@@ -111,10 +111,13 @@ export class RenderService {
       if (segments.length === 1) await this.ffmpeg.run(`${exportId}-visual`, ['-i', segments[0], '-c', 'copy', visualPath], { signal: controller.signal });
       else if (supportsXfade) {
         const args: string[] = []; for (const segment of segments) args.push('-i', segment); const filters: string[] = [];
+        // Windows FFmpeg builds can otherwise terminate chained xfade after the
+        // first segment when MP4 time bases/start timestamps differ.
+        segments.forEach((_, index) => filters.push(`[${index}:v]settb=AVTB,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v${index}]`));
         for (let index = 1; index < segments.length; index += 1) {
           const scene = project.scenes[index]; const kind = scene.transition === 'dissolve' ? 'dissolve' : scene.transition === 'slide' ? 'slideleft' : 'fade'; const duration = scene.transition === 'none' ? .01 : transition;
-          const input = index === 1 ? '[0:v]' : `[vx${index - 1}]`; const output = index === segments.length - 1 ? '[vout]' : `[vx${index}]`;
-          filters.push(`${input}[${index}:v]xfade=transition=${kind}:duration=${duration}:offset=${starts[index]}${output}`);
+          const input = index === 1 ? '[v0]' : `[vx${index - 1}]`; const output = index === segments.length - 1 ? '[vout]' : `[vx${index}]`;
+          filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${duration}:offset=${starts[index]}${output}`);
         }
         args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', visualPath);
         await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / totalDuration(project.scenes) * 10), 'Sahne geçişleri işleniyor') });
@@ -127,6 +130,9 @@ export class RenderService {
       await this.audio.mix(`${exportId}-audio`, { narration: project.scenes.filter((scene) => scene.narrationPath).map((scene) => ({ path: scene.narrationPath!, start: starts[project.scenes.indexOf(scene)], volume: project.audio.narrationVolume })), music: project.audio.musicClips, sfx: project.audio.sfxClips, musicVolume: project.audio.musicVolume, sfxVolume: project.audio.sfxVolume, duration: totalDuration(project.scenes), ducking: project.audio.musicDucking }, audioPath);
       this.report(record, 78, 'Altyazılar ve video birleştiriliyor'); const assPath = join(work, 'subtitles.ass'); await this.subtitles.write(project, assPath);
       await this.ffmpeg.run(`${exportId}-final`, ['-i', visualPath, '-i', audioPath, '-vf', this.subtitles.filterArgument(assPath), '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', preset.preset, '-crf', String(preset.crf), '-profile:v', 'high', '-level', '4.1', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', preset.bitrate, '-ar', '48000', '-movflags', '+faststart', '-t', String(totalDuration(project.scenes)), record.outputPath], { signal: controller.signal, onProgress: (seconds) => this.report(record, 78 + Math.min(21, seconds / totalDuration(project.scenes) * 21), 'MP4 kodlanıyor') });
+      const expectedFrames = Math.max(1, Math.ceil(totalDuration(project.scenes) * 30 - 1e-9));
+      const completedVideo = await this.ffmpeg.probe(record.outputPath);
+      if (completedVideo.frames !== expectedFrames) throw new Error(`MP4 kare doğrulaması başarısız: ${completedVideo.frames ?? 'bilinmiyor'} / ${expectedFrames}. Export tamamlandı olarak işaretlenmedi.`);
       const info = await stat(record.outputPath); record = this.exports.update(exportId, { status: 'completed', progress: 100, completedAt: new Date().toISOString(), fileSize: info.size });
       const completedProject = this.projects.get(project.id); completedProject.status = 'completed'; completedProject.recoveryNote = undefined; this.projects.update(completedProject);
       this.report(record, 100, 'Dışa aktarım tamamlandı'); await rm(work, { recursive: true, force: true }); this.logger.info(`Video oluşturuldu: ${record.outputPath}`);

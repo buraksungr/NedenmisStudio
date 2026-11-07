@@ -108,6 +108,29 @@ jobs:
             [pscustomobject]@{ name=$item.Name; bytes=$item.Length; sha256=(Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
           }
           [pscustomobject]@{ version='1.1.0'; build=[int]$env:GITHUB_RUN_NUMBER; commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; files=$files; testedOn='windows-latest'; humanListeningPerformed=$false } | ConvertTo-Json -Depth 5 | Set-Content release/build-manifest.json -Encoding UTF8
+      - name: Türkçe ASR sonuçlarını PR raporuna yaz
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $qualityPath = $null
+          if (Test-Path release/turkish-quality-result.json) { $qualityPath = 'release/turkish-quality-result.json' }
+          elseif (Test-Path release/turkish-quality-source-result.json) { $qualityPath = 'release/turkish-quality-source-result.json' }
+          if ($qualityPath) {
+            $quality = Get-Content $qualityPath -Raw | ConvertFrom-Json
+            $lines = @("## Türkçe Chatterbox V3 ASR kalite raporu", "", "Çalışma: $($env:GITHUB_RUN_ID) · Sonuç: **$($quality.ok)**", "", "| Örnek | Zorunlu | ASR geçti | CER | WER | Kelime |", "|---|---:|---:|---:|---:|---:|")
+            foreach ($case in $quality.cases) { $lines += "| $($case.id) | $($case.required) | $($case.asrIntelligibilityPassed) | $('{0:F4}' -f [double]$case.cer) | $('{0:F4}' -f [double]$case.wer) | $($case.transcriptWords) |" }
+            $lines += "", "ASR: $($quality.asr.engine) / $($quality.asr.model), CPU $($quality.asr.computeType), forced language=tr. Eşikler: CER ≤ $($quality.thresholds.maxCER), WER ≤ $($quality.thresholds.maxWER).", "", "**İnsan dinlemesi yapılmadı.** ASR yalnızca anlaşılırlık kanıtıdır; doğal prozodi veya konuşmacı benzerliği kanıtı değildir."
+            foreach ($case in $quality.cases) {
+              $expected = ([string]$case.expectedText).Replace('|', '\|')
+              $transcript = ([string]$case.transcript).Replace('|', '\|')
+              $lines += "", "<details><summary>$($case.id) — transkript</summary>", "", "**Beklenen:** $expected", "", "**ASR:** $transcript", "", "</details>"
+            }
+            [IO.File]::WriteAllText("$PWD/release/turkish-quality-summary.md", ($lines -join "`n"))
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/turkish-quality-summary.md }
+          }
       - name: Başarısızlık loglarını CI annotation’a yaz
         if: failure()
         shell: pwsh

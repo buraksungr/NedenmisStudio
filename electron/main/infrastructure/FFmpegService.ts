@@ -29,10 +29,11 @@ export class FFmpegService {
     try { const { stdout, stderr } = await execFileAsync(this.ffmpegPath, ['-hide_banner', '-filters'], { timeout: 10000, maxBuffer: 5 * 1024 * 1024 }); const supported = new RegExp(`\\s${name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s`).test(`${stdout}\n${stderr}`); this.filterCache.set(key, supported); return supported; } catch { return false; }
   }
   async version(): Promise<string> { const { stdout } = await execFileAsync(this.ffmpegPath, ['-version'], { timeout: 10000 }); return stdout.split('\n')[0]; }
-  async probe(filePath: string): Promise<{ duration: number; width?: number; height?: number; codec?: string; sampleRate?: number; channels?: number }> {
-    const { stdout } = await execFileAsync(this.ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=width,height,codec_name,sample_rate,channels', '-of', 'json', filePath], { timeout: 20000, maxBuffer: 5 * 1024 * 1024 });
-    const data = JSON.parse(stdout) as { format?: { duration?: string }; streams?: Array<{ width?: number; height?: number; codec_name?: string; sample_rate?: string; channels?: number }> };
-    return { duration: Number(data.format?.duration || 0), width: data.streams?.[0]?.width, height: data.streams?.[0]?.height, codec: data.streams?.[0]?.codec_name, sampleRate: Number(data.streams?.[0]?.sample_rate || 0) || undefined, channels: data.streams?.[0]?.channels };
+  async probe(filePath: string): Promise<{ duration: number; width?: number; height?: number; codec?: string; sampleRate?: number; channels?: number; frames?: number; videoDuration?: number }> {
+    const { stdout } = await execFileAsync(this.ffprobePath, ['-v', 'error', '-show_entries', 'format=duration:stream=width,height,codec_name,sample_rate,channels,nb_frames,duration', '-of', 'json', filePath], { timeout: 20000, maxBuffer: 5 * 1024 * 1024 });
+    const data = JSON.parse(stdout) as { format?: { duration?: string }; streams?: Array<{ width?: number; height?: number; codec_name?: string; sample_rate?: string; channels?: number; nb_frames?: string; duration?: string }> };
+    const first = data.streams?.[0];
+    return { duration: Number(data.format?.duration || 0), width: first?.width, height: first?.height, codec: first?.codec_name, sampleRate: Number(first?.sample_rate || 0) || undefined, channels: first?.channels, frames: Number(first?.nb_frames) || undefined, videoDuration: Number(first?.duration) || undefined };
   }
   run(jobId: string, args: string[], options: FFmpegRunOptions = {}): Promise<void> {
     return this.execute(jobId, args, options);
