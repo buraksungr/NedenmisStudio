@@ -31,12 +31,27 @@ function difference(a: Buffer, b: Buffer): number {
   return total / a.length;
 }
 
+class DiagnosticFFmpegService extends FFmpegService {
+  readonly diagnostics: unknown[] = [];
+  constructor() { super(() => process.env.NEDENMIS_FFMPEG_PATH); }
+  private async capture(jobId: string, args: string[]): Promise<void> {
+    const stage = jobId.match(/-(scene-\d+|visual|final)$/)?.[1]; const outputPath = args.at(-1)!;
+    if (!stage || !outputPath.endsWith('.mp4') || !existsSync(outputPath)) return;
+    const { stdout } = await execFileAsync(this.ffprobePath, ['-v', 'error', '-count_frames', '-show_entries', 'format=duration:stream=codec_type,nb_read_frames,duration,r_frame_rate', '-of', 'json', outputPath]);
+    this.diagnostics.push({ stage, outputPath, args, probe: JSON.parse(stdout) });
+  }
+  override async run(jobId: string, args: string[], options?: Parameters<FFmpegService['run']>[2]): Promise<void> { await super.run(jobId, args, options); await this.capture(jobId, args); }
+  override async runWithInput(jobId: string, args: string[], input: Parameters<FFmpegService['runWithInput']>[2], options?: Parameters<FFmpegService['runWithInput']>[3]): Promise<void> { await super.runWithInput(jobId, args, input, options); await this.capture(jobId, args); }
+}
+
 describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () => {
   it('CPU karelerini, MP4 piksel hareketini, H.264/AAC ve anlatım/altyazı zamanını doğrular', async () => {
-    const db = new AppDatabase(':memory:'); const projects = new ProjectRepository(db); const exports = new ExportRepository(db); const ffmpeg = new FFmpegService(() => undefined);
+    const db = new AppDatabase(':memory:'); const projects = new ProjectRepository(db); const exports = new ExportRepository(db); const ffmpeg = new DiagnosticFFmpegService();
     const fixture = createIceAnimationProject(1.2);
     const project = projects.create(projectInput({ name: ICE_TEST_PROJECT_NAME, topic: ICE_TEST_PROJECT_NAME, targetDuration: totalDuration(fixture.scenes) }));
     project.scenes = fixture.scenes; project.script = fixture.script;
+    const transitions = ['none', 'fade', 'dissolve', 'slide'] as const;
+    project.scenes.forEach((scene, index) => { scene.transition = transitions[index]; });
     expect(project.scenes).toHaveLength(4);
     expect(new Set(project.scenes.map((scene) => scene.animation?.preset)).size).toBe(4);
     expect(project.scenes.every((scene) => !scene.assetPath && scene.cameraMovement === 'static')).toBe(true);
@@ -55,6 +70,7 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
     const record = exports.get(started.id);
+    if (process.env.NEDENMIS_ANIMATION_DIAGNOSTICS) { await mkdir(dirname(process.env.NEDENMIS_ANIMATION_DIAGNOSTICS), { recursive: true }); await writeFile(process.env.NEDENMIS_ANIMATION_DIAGNOSTICS, JSON.stringify({ status: record.status, error: record.error, stages: ffmpeg.diagnostics }, null, 2), 'utf8'); }
     if (process.env.NEDENMIS_ANIMATION_OUTPUT && existsSync(record.outputPath)) { await mkdir(dirname(process.env.NEDENMIS_ANIMATION_OUTPUT), { recursive: true }); await copyFile(record.outputPath, process.env.NEDENMIS_ANIMATION_OUTPUT); }
     expect(record.error).toBeUndefined(); expect(record.status).toBe('completed');
     const probe = await ffmpeg.probe(record.outputPath);
@@ -81,7 +97,7 @@ describe('Why does ice float on water? — dört gerçek animasyon sahnesi', () 
     const sceneResults: { scene: number; preset?: string; meanPixelDifference: number; firstTime: number; secondTime: number }[] = [];
     const firstFrames: Buffer[] = [];
     for (let index = 0; index < 4; index += 1) {
-      const times = [starts[index] + .2, starts[index] + .85];
+      const times = [starts[index] + .4, starts[index] + 1.05];
       const frames: Buffer[] = [];
       for (let sample = 0; sample < 2; sample += 1) {
         const path = join(directory, `ice-motion-${index}-${sample}.png`);

@@ -85,7 +85,11 @@ export class RenderService {
         if (index === 0 && scene.transition !== 'none') filter += `,fade=t=in:st=0:d=${Math.min(.5, scene.duration / 3)}`;
         if (!supportsXfade && index > 0 && scene.transition !== 'none') filter += ',fade=t=in:st=0:d=0.18';
         if (!supportsXfade && !isLast && project.scenes[index + 1].transition !== 'none') filter += `,fade=t=out:st=${Math.max(0, duration - .18)}:d=0.18`;
-        args.push('-vf', filter, '-t', String(duration), '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-threads', '2');
+        args.push('-vf', filter);
+        // Raw frames already have an exact count. An additional -t can truncate
+        // the overlap frame required by xfade at the segment boundary.
+        if (!proceduralAnimation) args.push('-t', String(duration));
+        args.push('-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-threads', '2');
         if (proceduralAnimation) args.push('-frames:v', String(frames));
         args.push(path);
         if (proceduralAnimation) {
@@ -117,7 +121,7 @@ export class RenderService {
         for (let index = 1; index < segments.length; index += 1) {
           const scene = project.scenes[index]; const kind = scene.transition === 'dissolve' ? 'dissolve' : scene.transition === 'slide' ? 'slideleft' : 'fade'; const duration = scene.transition === 'none' ? .01 : transition;
           const input = index === 1 ? '[v0]' : `[vx${index - 1}]`; const output = index === segments.length - 1 ? '[vout]' : `[vx${index}]`;
-          filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${duration}:offset=${starts[index]}${output}`);
+          filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${duration}:offset=${starts[index].toFixed(6)}${output}`);
         }
         args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', visualPath);
         await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / totalDuration(project.scenes) * 10), 'Sahne geçişleri işleniyor') });

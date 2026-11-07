@@ -18,16 +18,18 @@ Kullanıcı arayüzü, mevcut görsel kimlik, import edilen medya, procedural ol
 
 Görsel kontrolde ilk kristal bağlarının altıgen yerine yıldız oluşturduğu bulundu ve düzeltildi. Son MP4 karelerinde üç gerçek altıgen çevrim görüldü.
 
+Windows CI'da container süresi doğru olduğu hâlde yalnızca 38/144 video karesi bulunan bir `xfade` hatası yakalandı. FFmpeg 7.0.2 ile yerelde birebir üretildi; aşama probe'ları kaybı `visual.mp4` birleşimine yerleştirdi. Rawvideo çıkışındaki `-t`, transition overlap için gereken 37. kareyi buduyor ve ilk input transition offset'inde EOF oluyordu. Procedural segmentlerde süre artık tam `-frames:v` ile belirleniyor, girişler normalize ediliyor ve son MP4 `nb_frames` kontrolünden geçmeden `completed` olamıyor. Aynı reprodüksiyon düzeltme sonrası 37/37/37/36 segment ve 144/144 final karesi verdi.
+
 ## Yerel gerçek export kanıtı
 
 Proje: **Why does ice float on water?** — dört farklı sahne, statik kamera, bilinen süreli PCM fixture'ları. Bu fixture konuşma kalitesi testi değildir.
 
-- MP4: 1080×1920, 30 FPS, H.264/AAC, 4.822 saniye; `-count_frames` ile **144/144 video karesi** ve 4.800 saniye video stream süresi doğrulandı.
-- Statik kamerada iki farklı zamanın ortalama piksel farkı:
-  - liquid: 7.4062
-  - crystallization: 10.4544
-  - lattice expansion: 10.2223
-  - floating ice: 5.7762
+- FFmpeg 7.0.2 `xfade` yolu, gerçek fade/dissolve/slide geçişleriyle: 1080×1920, 30 FPS, H.264/AAC, 4.800 saniye; `-count_frames` ile **144/144 video karesi** ve 4.800 saniye video stream süresi doğrulandı.
+- Statik kamerada, geçişler bittikten sonra alınan iki farklı zamanın ortalama piksel farkı:
+  - liquid: 7.4606
+  - crystallization: 10.3147
+  - lattice expansion: 9.8552
+  - floating ice: 5.2168
 - Son entegrasyon çalışması yaklaşık 60 saniyede tamamlandı.
 - Her altyazı cue'su kendi sahnesi içinde; anlatım karışım offset'leri sahne başlangıçlarıyla aynı.
 - Son dört MP4 karesi ayrıca çıkarılıp görsel olarak incelendi.

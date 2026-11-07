@@ -23,6 +23,7 @@ jobs:
       - name: Statik kontroller ve standart testler
         env:
           NEDENMIS_ANIMATION_RESULT: ${{ github.workspace }}\release\animation-test-result.json
+          NEDENMIS_ANIMATION_DIAGNOSTICS: ${{ github.workspace }}\release\animation-pipeline-diagnostics.json
           NEDENMIS_ANIMATION_OUTPUT: ${{ github.workspace }}\release\Why-does-ice-float-on-water.mp4
         run: |
           npm run typecheck
@@ -130,6 +131,17 @@ jobs:
             }
             [IO.File]::WriteAllText("$PWD/release/turkish-quality-summary.md", ($lines -join "`n"))
             if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/turkish-quality-summary.md }
+          }
+          if (Test-Path release/animation-pipeline-diagnostics.json) {
+            $diagnostic = Get-Content release/animation-pipeline-diagnostics.json -Raw | ConvertFrom-Json
+            $lines = @("## Animasyon render aşama tanısı", "", "Durum: **$($diagnostic.status)** · Hata: $($diagnostic.error)", "", "| Aşama | Decode edilen video karesi | Video stream süresi | Container süresi |", "|---|---:|---:|---:|")
+            foreach ($stage in $diagnostic.stages) {
+              $video = $stage.probe.streams | Where-Object { $_.codec_type -eq 'video' } | Select-Object -First 1
+              $lines += "| $($stage.stage) | $($video.nb_read_frames) | $($video.duration) | $($stage.probe.format.duration) |"
+            }
+            $lines += "", '<details><summary>FFmpeg komutları ve ham probe</summary>', '', '```json', ($diagnostic | ConvertTo-Json -Depth 12), '```', '</details>'
+            [IO.File]::WriteAllText("$PWD/release/animation-pipeline-summary.md", ($lines -join "`n"))
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/animation-pipeline-summary.md }
           }
       - name: Başarısızlık loglarını CI annotation’a yaz
         if: failure()
