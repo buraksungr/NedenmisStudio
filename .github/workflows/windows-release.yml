@@ -5,6 +5,7 @@ on:
     branches: [main]
 permissions:
   contents: write
+  pull-requests: write
 jobs:
   windows-production:
     runs-on: windows-latest
@@ -69,12 +70,22 @@ jobs:
       - name: Başarısızlık loglarını CI annotation’a yaz
         if: failure()
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          $sections = @()
           Get-ChildItem release -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
-            $text = [IO.File]::ReadAllText($_.FullName)
-            if ($text.Length -gt 12000) { $text = $text.Substring($text.Length - 12000) }
-            $escaped = $text.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A').Replace(':', '%3A').Replace(',', '%2C')
+            $raw = [IO.File]::ReadAllText($_.FullName).Replace("`r", "`n")
+            $clean = [regex]::Replace($raw, '\x1B\[[0-9;]*[A-Za-z]', '')
+            $tail = (($clean -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 70) -join "`n")
+            $escaped = $tail.Replace('%', '%25').Replace("`n", '%0A')
             Write-Host "::error::$($_.Name)%0A$escaped"
+            $sections += "## $($_.Name)`n``````text`n$tail`n``````"
+          }
+          if ($sections.Count) {
+            [IO.File]::WriteAllText("$PWD/release/failure-summary.md", "CI $($env:GITHUB_RUN_ID) teknik hata özeti`n`n$($sections -join "`n`n")")
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/failure-summary.md }
           }
       - name: Test ve ses/video kanıtlarını paketle
         if: always()

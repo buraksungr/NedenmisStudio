@@ -103,7 +103,14 @@ export class VoiceEngineManager {
   private async downloadModel(): Promise<void> {
     this.progress('model', 'Chatterbox Multilingual V3 modeli Hugging Face üzerinden indiriliyor…', { progress: 0 });
     let downloadedBytes = 0; const timer = setInterval(() => { void directorySize(join(this.modelsRoot, 'hub')).then((size) => { if (size !== downloadedBytes) { downloadedBytes = size; this.progress('model', `Model indiriliyor · ${(size / 1024 ** 2).toFixed(0)} MB`, { downloadedBytes: size }); } }).catch(() => undefined); }, 2000);
-    try { await this.run(this.python(), [this.bridge(), 'download'], 'model', { HF_HOME: this.modelsRoot, HF_HUB_DISABLE_XET: '1' }); }
+    try {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 3 && !this.snapshot(); attempt += 1) {
+        try { await this.run(this.python(), [this.bridge(), 'download'], 'model', { HF_HOME: this.modelsRoot, HF_HUB_DISABLE_XET: '1' }); lastError = undefined; }
+        catch (error) { lastError = error; this.logger.warn(`Model indirme denemesi ${attempt} başarısız`, error); if (attempt < 3) { this.progress('model', `İndirme kesildi; ${attempt + 1}. deneme başlıyor. Yarım dosyalar korunuyor…`); await new Promise((resolve) => setTimeout(resolve, 5000)); } }
+      }
+      if (lastError && !this.snapshot()) throw lastError;
+    }
     finally { clearInterval(timer); }
     if (!this.snapshot()) throw new Error('Model indirmesi tamamlandı ancak V3 dosyalarının tamamı bulunamadı.'); this.saveState({ modelDownloaded: true });
   }
