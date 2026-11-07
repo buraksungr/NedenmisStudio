@@ -44,8 +44,8 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) void shell.openExternal(url); return { action: 'deny' }; });
   mainWindow.webContents.on('will-navigate', (event, url) => { const current = mainWindow?.webContents.getURL(); if (current && url !== current && !url.startsWith('file:') && !url.startsWith('http://localhost:5173')) { event.preventDefault(); } });
   registerIpc(context, mainWindow, initialStorage);
-  if (process.env.VITE_DEV_SERVER_URL) await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL); else await mainWindow.loadFile(join(directory, '../renderer/index.html'));
   if (process.env.NEDENMIS_SMOKE_TEST) mainWindow.webContents.once('did-finish-load', () => { void (async () => { const report = { ok: true, packaged: app.isPackaged, platform: process.platform, arch: process.arch, version: app.getVersion(), userData: app.getPath('userData'), database: join(app.getPath('userData'), 'nedenmis-studio.sqlite'), storage: initialStorage, voiceBridgeExists: existsSync(app.isPackaged ? join(process.resourcesPath, 'voice-engine', 'bridge.py') : join(app.getAppPath(), 'voice-engine', 'bridge.py')), ffmpegVersion: await context!.ffmpeg.version(), rendererLoaded: true }; await writeFile(process.env.NEDENMIS_SMOKE_TEST!, JSON.stringify(report, null, 2), 'utf8'); setTimeout(() => app.quit(), 400); })().catch(async (error) => { context?.logger.error('Smoke testi başarısız', error); await writeFile(process.env.NEDENMIS_SMOKE_TEST!, JSON.stringify({ ok: false, error: String(error) }), 'utf8'); app.exit(1); }); });
+  if (process.env.VITE_DEV_SERVER_URL) await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL); else await mainWindow.loadFile(join(directory, '../renderer/index.html'));
   mainWindow.on('closed', () => { mainWindow = undefined; });
 }
 

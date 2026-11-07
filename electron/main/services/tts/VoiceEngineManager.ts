@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
-import { cpus } from 'node:os';
+import { cpus, freemem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { x as extractTar } from 'tar';
 import type { VoiceEngineProgress, VoiceEngineStatus } from '../../../../shared/types.js';
@@ -131,7 +131,7 @@ export class VoiceEngineManager {
     });
   }
   private startWorker(snapshot: string): void {
-    const threads = Math.max(1, Math.min(4, cpus().length)); this.workerStderr = ''; this.workerBuffer = '';
+    const memoryLimit = freemem() < 6 * 1024 ** 3 ? 2 : 4; const threads = Math.max(1, Math.min(memoryLimit, cpus().length)); this.workerStderr = ''; this.workerBuffer = '';
     this.progress('generation', `Chatterbox V3 CPU üzerinde yükleniyor · ${threads} iş parçacığı…`);
     const child = spawn(this.python(), [this.bridge(), 'worker', '--snapshot', snapshot, '--threads', String(threads)], { windowsHide: true, env: { ...process.env, HF_HOME: this.modelsRoot, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_XET: '1' } });
     this.worker = child;

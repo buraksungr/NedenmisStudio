@@ -25,9 +25,16 @@ jobs:
       - name: Üretim derlemesi
         run: npm run build
       - name: Geliştirme Electron açılışı
-        run: node scripts/electron-smoke.mjs --dev
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          node scripts/electron-smoke.mjs --dev 2>&1 | Tee-Object release/dev-electron-smoke.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Üretim Electron açılışı
-        run: node scripts/electron-smoke.mjs
+        shell: pwsh
+        run: |
+          node scripts/electron-smoke.mjs 2>&1 | Tee-Object release/production-electron-smoke.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Gerçek sentetik konuşmacı referansı
         shell: pwsh
         run: |
@@ -61,6 +68,7 @@ jobs:
           name: NedenmisStudio-Windows-Test-Kanitlari
           path: |
             release/*.json
+            release/*.log
             release/previews/**
             release/exports/**
           if-no-files-found: warn

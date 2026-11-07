@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { cpus, freemem, totalmem } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import { AppDatabase } from '../../electron/main/infrastructure/database/Database.js';
 import { ProjectRepository } from '../../electron/main/infrastructure/database/ProjectRepository.js';
@@ -31,7 +32,7 @@ describe.skipIf(!enabled)('Gerçek Chatterbox Multilingual V3 Windows CPU doğru
       const exported = context.exports.get(record.id); expect(exported.error).toBeUndefined(); expect(exported.status).toBe('completed'); const video = await context.ffmpeg.probe(exported.outputPath); expect(video.width).toBe(1080); expect(video.height).toBe(1920); expect(video.codec).toBe('h264'); expect(video.duration).toBeGreaterThan(2); expect(existsSync(exported.outputPath)).toBe(true);
       const databasePath = join(storage, 'chatterbox-e2e.sqlite'); context.voiceEngine.close(); context.database.close();
       const reopened = new AppDatabase(databasePath); const persisted = new ProjectRepository(reopened).get(project.id); expect(persisted.scenes).toHaveLength(2); expect(persisted.scenes.every((scene) => scene.narrationPath && existsSync(scene.narrationPath))).toBe(true); reopened.close();
-      const result = { ok: true, model: preview.engine!.model, checkpoint: preview.engine!.checkpoint, device: preview.engine!.device, referenceSha256: preview.engine!.referenceSha256, previewSeconds: preview.duration, previewGenerationSeconds: preview.engine!.generationSeconds, projectNarrationSeconds: narrated.scenes.map((scene) => scene.narrationDuration), mp4: exported.outputPath, video, persistenceAfterRestart: true, note: 'Gerçek referans kullanımı ve dosya üretimi doğrulandı; konuşmacı benzerliği otomatik ölçülmedi, örnek dinlenmelidir.' };
+      const result = { ok: true, model: preview.engine!.model, checkpoint: preview.engine!.checkpoint, device: preview.engine!.device, referenceSha256: preview.engine!.referenceSha256, previewSeconds: preview.duration, previewGenerationSeconds: preview.engine!.generationSeconds, projectNarrationSeconds: narrated.scenes.map((scene) => scene.narrationDuration), mp4: exported.outputPath, video, persistenceAfterRestart: true, hardware: { cpu: cpus()[0]?.model, logicalCores: cpus().length, totalMemoryGB: Math.round(totalmem() / 1024 ** 3 * 10) / 10, freeMemoryAtEndGB: Math.round(freemem() / 1024 ** 3 * 10) / 10 }, note: 'Gerçek referans kullanımı ve dosya üretimi doğrulandı; konuşmacı benzerliği otomatik ölçülmedi, örnek dinlenmelidir.' };
       if (process.env.NEDENMIS_CHATTERBOX_RESULT) { await mkdir(dirname(process.env.NEDENMIS_CHATTERBOX_RESULT), { recursive: true }); await writeFile(process.env.NEDENMIS_CHATTERBOX_RESULT, JSON.stringify(result, null, 2), 'utf8'); } console.log(JSON.stringify(result, null, 2));
       expect(settings.activeTtsProvider).toBe('chatterbox-multilingual-v3');
     } finally { context.voiceEngine.close(); try { context.database.close(); } catch { /* Yeniden açılış testinde zaten kapandı. */ } }

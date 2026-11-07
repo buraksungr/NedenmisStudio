@@ -1,5 +1,5 @@
 import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron';
-import { cpus, totalmem } from 'node:os';
+import { cpus, freemem, totalmem } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { z } from 'zod';
 import { apiKeySchema, idSchema, projectInputSchema, projectSchema, ttsRequestSchema, urlSchema } from '../../../shared/validation.js';
@@ -77,7 +77,7 @@ export function registerIpc(context: AppContext, window: BrowserWindow, initialS
   handle('exports:cancel', (exportId) => context.render.cancel(idSchema.parse(exportId)));
   handle('exports:reveal', async (path) => { if (context.exports.list().some((record) => record.outputPath === path)) shell.showItemInFolder(String(path)); else throw new Error('Dışa aktarım kaydı bulunamadı.'); });
   handle('dashboard:stats', () => context.projects.stats());
-  handle('system:info', async () => { let ffmpegAvailable = true; let ffmpegVersion: string | undefined; try { ffmpegVersion = await context.ffmpeg.version(); } catch (error) { ffmpegAvailable = false; context.logger.warn('FFmpeg kullanılamıyor', error); } return { platform: process.platform, version: app.getVersion(), ffmpegAvailable, ffmpegVersion, storagePath: context.settings.get().storagePath || initialStorage, cpuCores: cpus().length, totalMemoryGB: Math.round(totalmem() / 1024 ** 3 * 10) / 10 }; });
+  handle('system:info', async () => { let ffmpegAvailable = true; let ffmpegVersion: string | undefined; try { ffmpegVersion = await context.ffmpeg.version(); } catch (error) { ffmpegAvailable = false; context.logger.warn('FFmpeg kullanılamıyor', error); } return { platform: process.platform, version: app.getVersion(), ffmpegAvailable, ffmpegVersion, storagePath: context.settings.get().storagePath || initialStorage, cpuCores: cpus().length, totalMemoryGB: Math.round(totalmem() / 1024 ** 3 * 10) / 10, freeMemoryGB: Math.round(freemem() / 1024 ** 3 * 10) / 10 }; });
   handle('system:open-external', (url) => shell.openExternal(urlSchema.parse(url)));
   handle('storage:ensure', async () => { await mkdir(context.settings.get().storagePath, { recursive: true }); });
 }

@@ -307,6 +307,7 @@ export interface SystemInfo {
   storagePath: string;
   cpuCores: number;
   totalMemoryGB: number;
+  freeMemoryGB: number;
 }
 
 export interface AppApi {
