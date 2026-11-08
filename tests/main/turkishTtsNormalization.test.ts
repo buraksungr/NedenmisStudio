@@ -33,6 +33,10 @@ describe('Türkçe TTS sayı ve sembol normalizasyonu', () => {
     expect(source).toBe('Yıl 2026. Işık 450 nm ve çözünürlük 1080×1920.');
   });
 
+  it('boşluklu çıkarma, üs ve bilimsel gösterimi okur', () => {
+    expect(normalizeTurkishForTts('2 - 3; 2^3; 1e9; 5≥3; 2≠4; π≈3,14')).toBe('iki eksi üç; iki üssü üç; bir çarpı on üssü dokuz; beş büyük eşittir üç; iki eşit değildir dört; π yaklaşık üç virgül on dört');
+  });
+
   it('BigInt ile büyük sayıları okur', () => {
     expect(integerToTurkishWords('1000000000000')).toBe('bir trilyon');
     expect(integerToTurkishWords('1000000000000000')).toBe('bir katrilyon');

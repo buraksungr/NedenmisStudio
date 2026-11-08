@@ -100,8 +100,10 @@ export function normalizeTurkishForTts(source: string): string {
   text = text.replace(new RegExp(`(${NUMBER})\\s*(${currencyNames}|₺)`, 'gi'), (_match, value, currency) => `${decimalToWords(value)} ${CURRENCIES[currency.toLowerCase()]}`);
   text = text.replace(new RegExp(`(${NUMBER})\\s*(${unitPattern})\\b`, 'gi'), (_match, value, unit) => `${decimalToWords(value)} ${UNITS[unit.toLowerCase()]}`);
 
+  text = text.replace(new RegExp(`(${NUMBER})[eE]([+-]?\\d+)`, 'g'), (_match, value, exponent) => `${decimalToWords(value)} çarpı on üssü ${integerToTurkishWords(exponent)}`);
   text = text.replace(/±/g, ' artı eksi ').replace(/[×*]/g, ' çarpı ').replace(/(?<=\d)\s*[xX]\s*(?=\d)/g, ' çarpı ')
-    .replace(/\//g, ' bölü ').replace(/\+/g, ' artı ').replace(/=/g, ' eşittir ').replace(/>/g, ' büyüktür ').replace(/</g, ' küçüktür ');
+    .replace(/≤/g, ' küçük eşittir ').replace(/≥/g, ' büyük eşittir ').replace(/≠/g, ' eşit değildir ').replace(/≈/g, ' yaklaşık ').replace(/∞/g, ' sonsuz ')
+    .replace(/\//g, ' bölü ').replace(/\+/g, ' artı ').replace(/(?<=\d)\s+-\s+(?=\d)/g, ' eksi ').replace(/\^/g, ' üssü ').replace(/=/g, ' eşittir ').replace(/>/g, ' büyüktür ').replace(/</g, ' küçüktür ');
   text = text.replace(new RegExp(NUMBER, 'g'), (value) => decimalToWords(value));
   return text.replace(/\s+/g, ' ').replace(/\s+([,.!?;:])/g, '$1').trim();
 }

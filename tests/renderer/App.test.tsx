@@ -3,9 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppApi } from '../../shared/types';
 import { DEFAULT_IDENTITY, defaultSettings } from '../../shared/defaults';
+import { composeScript, parseScriptSections } from '../../shared/script';
 import { App } from '../../src/renderer/App';
 import { sampleProject } from '../helpers';
 import { createIceAnimationProject } from '../fixtures/iceAnimationProject';
+import { createSkyAnimationProject, SKY_SCENE_NARRATIONS } from '../fixtures/skyAnimationProject';
 
 function mockApi(): AppApi {
   return {
@@ -24,7 +26,7 @@ function mockApi(): AppApi {
 
 describe('React uygulaması smoke testi', () => {
   beforeEach(() => { window.nedenmis = mockApi(); Object.defineProperty(window, 'matchMedia', { writable: true, value: vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }) }); });
-  afterEach(() => { cleanup(); vi.clearAllMocks(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
   it('ana sayfayı ve tüm temel çalışma alanlarını açar', async () => {
     render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Projeler' })); expect(await screen.findByText('Proje arşiviniz henüz boş')).toBeTruthy();
@@ -56,6 +58,54 @@ describe('React uygulaması smoke testi', () => {
     fireEvent.click(screen.getByRole('button', { name: /Lower density lets ice float/ }));
     await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-animation-preset')).toBe('floating-ice'));
   });
+  it('üç gökyüzü sahnesinin küçük resimlerini, sesini, zamanını ve hareketli önizlemesini eşitler', async () => {
+    const api = mockApi(); const project = createSkyAnimationProject();
+    api.projects.list = vi.fn().mockResolvedValue([project]); api.projects.get = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); window.nedenmis = api;
+    const callbacks = new Map<number, FrameRequestCallback>(); let nextId = 1;
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { const handle = nextId++; callbacks.set(handle, callback); return handle; }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => callbacks.delete(handle)));
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(); const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    render(<App />); fireEvent.click(await screen.findByRole('button', { name: /Gökyüzü neden mavi görünür/ }));
+    await screen.findByTestId('animated-scene');
+    await waitFor(() => expect(document.querySelectorAll('img[src^="/proof/sky-scene-"]')).toHaveLength(6));
+    fireEvent.click(screen.getByRole('button', { name: 'Oynat' }));
+    await waitFor(() => expect(play).toHaveBeenCalled());
+    const audio = document.querySelector('audio')!; audio.currentTime = .8; fireEvent.timeUpdate(audio);
+    await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-frame-time')).toBe('0.800'));
+    fireEvent.click(screen.getByRole('button', { name: 'Duraklat' })); await waitFor(() => expect(pause).toHaveBeenCalled());
+    for (let index = 0; index < project.scenes.length; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: new RegExp(SKY_SCENE_NARRATIONS[index].slice(0, 24)) }));
+      const preview = await screen.findByTestId('animated-scene');
+      await waitFor(() => expect(preview.getAttribute('aria-label')).toContain(`Sahne ${index + 1}`));
+      expect(preview.getAttribute('data-animation-preset')).toBe('light-scattering');
+      expect(preview.innerHTML).toContain('data-light-photon=');
+      expect(document.querySelector('audio')?.getAttribute('src')).toBe(project.scenes[index].narrationPath);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it('sonuç bölümünü ayrı düzenler, ana senaryonun sonunda ve kalıcı kayıtta saklar', async () => {
+    const api = mockApi(); const project = sampleProject('section-project');
+    project.scriptSections = { hook: 'Güçlü bir soru?', explanation: 'Kısa ve açık bilimsel açıklama.', conclusion: 'İlk anlamlı sonuç.' };
+    project.script = composeScript(project.scriptSections);
+    const update = vi.fn().mockImplementation(async (next) => ({ ...next, scriptSections: parseScriptSections(next.script) })); api.projects.create = vi.fn().mockResolvedValue(project); api.projects.update = update; window.nedenmis = api;
+    render(<App />); expect(await screen.findAllByText('Genel Bakış')).not.toHaveLength(0); fireEvent.click(screen.getAllByRole('button', { name: 'Yeni video' })[0]);
+    expect(await screen.findByText('Gökyüzü neden mavi?')).toBeTruthy();
+    fireEvent.change(await screen.findByPlaceholderText('Örn. Gökyüzü neden mavi görünür?'), { target: { value: 'Bölüm kalıcılığı sınaması' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Projeyi oluştur' }));
+    await waitFor(() => expect(api.projects.create).toHaveBeenCalled()); expect(await screen.findByText('Anlatım senaryosu')).toBeTruthy();
+    const conclusion = await screen.findByTestId('conclusion-editor') as HTMLTextAreaElement; expect(conclusion.value).toBe('İlk anlamlı sonuç.');
+    fireEvent.change(conclusion, { target: { value: 'Mavi ışığın daha çok saçılması gökyüzünün rengini belirler.' } }); fireEvent.blur(conclusion);
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    const savedInput = update.mock.calls.at(-1)![0]; const saved = await update.mock.results.at(-1)!.value;
+    expect(saved.scriptSections).toEqual({ ...project.scriptSections, conclusion: 'Mavi ışığın daha çok saçılması gökyüzünün rengini belirler.' });
+    expect(savedInput.script.endsWith('Mavi ışığın daha çok saçılması gökyüzünün rengini belirler.')).toBe(true);
+    expect(saved.script.endsWith('Mavi ışığın daha çok saçılması gökyüzünün rengini belirler.')).toBe(true);
+    expect(saved.script.split('\n\n')).toHaveLength(3);
+    expect((screen.getByLabelText('Sonuç bölümü') as HTMLTextAreaElement).value).toBe('Mavi ışığın daha çok saçılması gökyüzünün rengini belirler.');
+    const main = screen.getByPlaceholderText('Senaryonuzu buraya yazın veya sağdaki üretim düğmesini kullanın…') as HTMLTextAreaElement; expect(main.value).toBe(saved.script);
+  });
+
   it('metin seçilmeden rewrite göndermez ve seçimle doğru metni gönderir', async () => {
     const api = mockApi(); const project = sampleProject('rewrite-project'); const rewrite = vi.fn().mockResolvedValue('Işık davranışını sadeleştir.');
     api.projects.create = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); api.ai = { rewrite } as unknown as AppApi['ai']; window.nedenmis = api;
