@@ -35,6 +35,7 @@ export class TtsService {
       try {
         scene.ttsText = normalizeTurkishForTts(scene.narration);
         const result = await provider.synthesize({ text: scene.ttsText, selection: project.voice, referenceVoicePath: this.reference() }, path);
+        scene.ttsEngine = result.engine;
         scene.narrationPath = path; scene.narrationDuration = result.duration; scene.duration = Math.max(1, Number((result.duration + .22).toFixed(3)));
         scene.subtitleTiming = result.timingMode; (scene as typeof scene & { alignedCues?: unknown }).alignedCues = result.cues;
         const info = await stat(path); this.media.upsertByPath({ kind: 'narration', name: `${project.name} · Sahne ${scene.number}`, path, mimeType: mimeFor(provider.id), size: info.size, duration: result.duration, projectId: project.id });

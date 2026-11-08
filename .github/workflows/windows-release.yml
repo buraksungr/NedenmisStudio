@@ -88,6 +88,20 @@ jobs:
           set CODE=%ERRORLEVEL%
           type release\chatterbox-e2e.log
           exit /b %CODE%
+      - name: Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E
+        if: success()
+        env:
+          NEDENMIS_SKY_E2E: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\\nedenmis-chatterbox\\storage
+          NEDENMIS_TURKISH_QUALITY_MANIFEST: ${{ github.workspace }}\\release\\turkish-quality-manifest.json
+          NEDENMIS_SKY_RESULT: ${{ github.workspace }}\\release\\sky-production-result.json
+          NEDENMIS_SKY_OUTPUT: ${{ github.workspace }}\\release\\Why-does-the-sky-look-blue.mp4
+        shell: cmd
+        run: |
+          npm run test:sky > release\\sky-production-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\\sky-production-e2e.log
+          exit /b %CODE%
       - name: Bağımsız Türkçe ASR anlaşılırlık kapısı
         if: always()
         shell: pwsh

@@ -16,7 +16,7 @@ import type { ConnectionTestResult, TtsRequest, VoiceInfo } from '../../shared/t
 import { projectInput } from '../helpers.js';
 
 let directory: string; beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'nedenmis-tts-')); }); afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
-function fakeProvider(id: string, calls: TtsRequest[]): TtsProvider { return { id, name: id, supportsSpeed: true, supportsPitch: false, referenceVoiceSupported: id.includes('chatterbox'), voices: async (): Promise<VoiceInfo[]> => [], synthesize: async (request, outputPath) => { calls.push(request); await writeFile(outputPath, 'test-audio'); return { duration: 1.25, timingMode: 'estimated' as const }; }, test: async (): Promise<ConnectionTestResult> => ({ ok: true, message: 'routing-test-only' }) }; }
+function fakeProvider(id: string, calls: TtsRequest[]): TtsProvider { return { id, name: id, supportsSpeed: true, supportsPitch: false, referenceVoiceSupported: id.includes('chatterbox'), voices: async (): Promise<VoiceInfo[]> => [], synthesize: async (request, outputPath) => { calls.push(request); await writeFile(outputPath, 'test-audio'); return { duration: 1.25, timingMode: 'estimated' as const, engine: { model: 'routing-fake', checkpoint: 'routing-fake.safetensors', device: 'cpu', referenceSha256: 'a'.repeat(64), generationSeconds: 0, modelLoadSeconds: 0, unknownTokens: 0 } }; }, test: async (): Promise<ConnectionTestResult> => ({ ok: true, message: 'routing-test-only' }) }; }
 
 describe('TTS sağlayıcı yönlendirmesi', () => {
   it('proje ve önizlemede seçilen motoru kullanır, referansı her sahneye geçirir ve SAPI’ye düşmez', async () => {
@@ -36,6 +36,7 @@ describe('TTS sağlayıcı yönlendirmesi', () => {
     expect(calls[0].text).toBe('yüzde otuz beş ve yirmi beş kilometre. Yıl iki bin yirmi altı.');
     expect(result.scenes[0].narration).toBe('%35 ve 25 km. Yıl 2026.');
     expect(result.scenes[0].ttsText).toBe(calls[0].text);
+    expect(result.scenes[0].ttsEngine?.checkpoint).toBe('routing-fake.safetensors'); expect(projects.get(project.id).scenes[0].ttsEngine?.unknownTokens).toBe(0);
     expect(result.scenes[0].subtitles.map((cue) => cue.text).join(' ')).toContain('%35');
     expect(result.scenes[0].subtitles.map((cue) => cue.text).join(' ')).toContain('2026');
     db.close();

@@ -40,6 +40,8 @@ export interface Scene {
   narration: string;
   /** Orijinal anlatım korunur; yalnızca TTS sağlayıcısına gönderilen sayı/sembol normalize metni. */
   ttsText?: string;
+  /** Son gerçek sentezin teknik kanıtı; eski projelerde alan bulunmaz. */
+  ttsEngine?: TtsResult['engine'];
   section?: SceneSection;
   visualDescription: string;
   visualPrompt: string;

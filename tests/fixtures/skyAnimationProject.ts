@@ -5,9 +5,9 @@ import { sampleProject } from '../helpers.js';
 
 export const SKY_TEST_PROJECT_NAME = 'Gökyüzü neden mavi görünür?';
 export const SKY_SCENE_NARRATIONS = [
-  'Beyaz güneş ışığının içinde gökkuşağının bütün renkleri saklıdır; peki gözümüze neden özellikle mavi ulaşır?',
-  'Işık, havadaki küçük moleküllere çarpar. Mavi ışık, kırmızıdan daha fazla saçılır; dalga boyu yaklaşık 450 nm olan mavi ışık her yöne dağılır.',
-  'Bu yüzden gündüz gökyüzünü mavi görürüz. Gün batımında ışık daha uzun yol alır; mavi saçılır, kırmızı ve turuncu gözümüze ulaşır.',
+  'Güneş’in ışığı beyaz. Peki gökyüzü neden mavi?',
+  'Beyaz ışık aslında bütün görünür renkleri taşır. Atmosferdeki küçük moleküller, yaklaşık 450 nanometre dalga boyundaki mavi ışığı kırmızıdan çok daha güçlü saçar. Böylece her yönden gözümüze ulaşan ışıkta mavi baskın olur.',
+  'Gökyüzünün rengi, beyaz ışığın atmosferde bize dağıtılmış hâlidir.',
 ];
 const sections = { hook: SKY_SCENE_NARRATIONS[0], explanation: SKY_SCENE_NARRATIONS[1], conclusion: SKY_SCENE_NARRATIONS[2] };
 

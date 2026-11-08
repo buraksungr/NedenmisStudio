@@ -28,6 +28,8 @@
     "test:integration": "vitest run tests/integration",
     "pretest:chatterbox": "node scripts/prepare-node-native.mjs",
     "test:chatterbox": "vitest run tests/integration/chatterbox.e2e.test.ts",
+    "pretest:sky": "node scripts/prepare-node-native.mjs",
+    "test:sky": "vitest run tests/integration/sky-production.e2e.test.ts",
     "smoke:electron": "node scripts/electron-smoke.mjs",
     "smoke:dev": "node scripts/electron-smoke.mjs --dev",
     "dist": "npm run build && electron-builder",
