@@ -35,6 +35,7 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
     "pack:zip": "node scripts/package-zip.mjs",
+    "pack:win-dir": "npm run build && electron-builder --win dir --x64",
     "pack:portable": "node scripts/package-portable.mjs",
     "postinstall": "electron-builder install-app-deps"
   },

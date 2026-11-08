@@ -92,15 +92,15 @@ jobs:
         if: success()
         env:
           NEDENMIS_SKY_E2E: '1'
-          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\\nedenmis-chatterbox\\storage
-          NEDENMIS_TURKISH_QUALITY_MANIFEST: ${{ github.workspace }}\\release\\turkish-quality-manifest.json
-          NEDENMIS_SKY_RESULT: ${{ github.workspace }}\\release\\sky-production-result.json
-          NEDENMIS_SKY_OUTPUT: ${{ github.workspace }}\\release\\Why-does-the-sky-look-blue.mp4
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_TURKISH_QUALITY_MANIFEST: ${{ github.workspace }}\release\turkish-quality-manifest.json
+          NEDENMIS_SKY_RESULT: ${{ github.workspace }}\release\sky-production-result.json
+          NEDENMIS_SKY_OUTPUT: ${{ github.workspace }}\release\Why-does-the-sky-look-blue.mp4
         shell: cmd
         run: |
-          npm run test:sky > release\\sky-production-e2e.log 2>&1
+          npm run test:sky > release\sky-production-e2e.log 2>&1
           set CODE=%ERRORLEVEL%
-          type release\\sky-production-e2e.log
+          type release\sky-production-e2e.log
           exit /b %CODE%
       - name: Bağımsız Türkçe ASR anlaşılırlık kapısı
         if: always()
@@ -112,10 +112,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $python voice-engine/quality_check.py --manifest release/turkish-quality-manifest.json --output release/turkish-quality-source-result.json
           exit $LASTEXITCODE
-      - name: Windows x64 NSIS kurucusu
-        run: npm run dist:win
+      - name: Windows x64 unpacked üretim (installer yok)
+        run: npm run pack:win-dir
       - name: Taşınabilir ZIP
         run: node scripts/package-portable.mjs
+      - name: ZIP’ten bağımsız aç, kopya SQLite, Rayleigh önizleme ve MP4 doğrula
+        if: success()
+        shell: pwsh
+        run: ./scripts/test-portable.ps1 -ZipPath ./release/NedenmisStudio-Portable.zip -VoiceTestRoot "$env:RUNNER_TEMP\nedenmis-chatterbox"
+      - name: Windows x64 NSIS kurucusu
+        if: success()
+        run: npm run dist:win
       - name: Kur, terminalsiz aç ve SQLite doğrula
         shell: pwsh
         run: ./scripts/test-installer.ps1 -SetupPath ./release/NedenmisStudio-Setup.exe -VoiceTestRoot "$env:RUNNER_TEMP\nedenmis-chatterbox"
@@ -217,6 +224,7 @@ jobs:
             release/previews/**
             release/exports/**
             release/Kurulu-Uygulama-Testi/**
+            release/Portable-Uygulama-Testi/**
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
@@ -226,6 +234,8 @@ jobs:
             release/NedenmisStudio-Portable.zip
             release/installer-test-result.json
             release/chatterbox-test-result.json
+            release/sky-production-result.json
+            release/portable-test-result.json
             release/turkish-quality-result.json
             release/turkish-quality-source-result.json
             release/build-manifest.json
@@ -236,10 +246,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "windows-v1.1.0-build$($env:GITHUB_RUN_NUMBER)"
-          $assets = @('release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/chatterbox-test-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json')
+          $assets = @(
+            'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
+            'release/chatterbox-test-result.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
+            'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass'
+          )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/exports -Filter *.mp4 -File | ForEach-Object { $_.FullName }
-          gh release create $tag @assets --target $env:GITHUB_SHA --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build $env:GITHUB_RUN_NUMBER" --notes "Gerçek Chatterbox Multilingual V3, V3 NFKD/fullcase ön işlemesi ve gerçek Türkçe referansla A/B sınandı. Dört sahneli Buz neden suda yüzer? projesi, gerçek nesne animasyonu, 1080x1920/30 FPS MP4, altyazı, SQLite, kurulu uygulama önizlemesi/export ve bağımsız Türkçe ASR kalite kapıları başarılı olmadan bu adım çalışmaz. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model birkaç GB olduğu için ilk kullanımda Ses Stüdyosu'ndan indirilir."
+          $assets += Get-ChildItem release/previews -Filter 'sky-*.wav' -File | ForEach-Object { $_.FullName }
+          gh release create $tag @assets --target $env:GITHUB_SHA --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build $env:GITHUB_RUN_NUMBER" --notes "Gerçek Chatterbox Multilingual V3 ve bağımsız Türkçe ASR ile sayı telaffuzu; üç sahneli Gökyüzü neden mavi görünür? Rayleigh animasyonu, sonuç anlatımı ve özgün altyazılar; 1080x1920/30 FPS MP4; SQLite yeniden açılış; önce bağımsız ZIP sonra NSIS kurulu uygulama önizleme/export kapıları doğrulandı. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model ilk kullanımda Ses Stüdyosu'ndan indirilir."
 
   drive-upload:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.drive_upload_only }}
@@ -271,8 +287,11 @@ jobs:
               'Bağımlılıklar', 'Electron runtime doğrulaması', 'Statik kontroller ve standart testler',
               'Üretim derlemesi', 'Geliştirme Electron açılışı', 'Üretim Electron açılışı',
               'Gerçek sentetik konuşmacı referansı', 'Resmî Türkçe V3 referansını test ortamına al',
-              'Gerçek Chatterbox V3 Türkçe klonlama ve video testi', 'Bağımsız Türkçe ASR anlaşılırlık kapısı',
-              'Windows x64 NSIS kurucusu', 'Taşınabilir ZIP', 'Kur, terminalsiz aç ve SQLite doğrula',
+              'Gerçek Chatterbox V3 Türkçe klonlama ve video testi',
+              'Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E', 'Bağımsız Türkçe ASR anlaşılırlık kapısı',
+              'Windows x64 unpacked üretim (installer yok)', 'Taşınabilir ZIP',
+              'ZIP’ten bağımsız aç, kopya SQLite, Rayleigh önizleme ve MP4 doğrula',
+              'Windows x64 NSIS kurucusu', 'Kur, terminalsiz aç ve SQLite doğrula',
               'Kurulu uygulama WAV/MP4 kanıtlarını topla', 'Kurulum boyutları ve SHA-256 manifesti',
               'Test ve ses/video kanıtlarını paketle',
           ]
@@ -291,6 +310,11 @@ jobs:
           gh run download "$SOURCE_RUN_ID" -n NedenmisStudio-Windows-Test-Kanitlari -D release-evidence
           cp release-evidence/Kurulu-Uygulama-Testi/installed-turkish.wav release-source/installed-turkish.wav
           cp release-evidence/Kurulu-Uygulama-Testi/installed-four-scenes.mp4 release-source/installed-four-scenes.mp4
+          cp release-evidence/Why-does-the-sky-look-blue.mp4 release-source/Why-does-the-sky-look-blue.mp4
+          cp release-evidence/Portable-Uygulama-Testi/portable-sky.mp4 release-source/portable-sky.mp4
+          cp release-evidence/previews/sky-original-subtitles.srt release-source/sky-original-subtitles.srt
+          cp release-evidence/previews/sky-export-subtitles.ass release-source/sky-export-subtitles.ass
+          cp release-evidence/previews/sky-*.wav release-source/
           python - <<'PY'
           import hashlib, json, os
           from pathlib import Path
@@ -314,7 +338,14 @@ jobs:
           assert installed['ok'] and installed['persistentProjectsReopened'] >= 1
           assert installed['installedAnimationPreview']['changed'] and installed['installedAnimationPreview']['played']
           assert installed['installedExport']['status'] == 'completed'
-          print('Zorunlu ASR, kurulu uygulama, animasyon, export ve SQLite kanıtları doğrulandı.')
+          sky = json.loads((root / 'sky-production-result.json').read_text(encoding='utf-8-sig'))
+          assert sky['ok'] and sky['animatedScenes'] >= 3 and sky['video']['decodedFrames'] == sky['video']['expectedFrames']
+          assert all(case['asrIntelligibilityPassed'] for case in quality['cases'] if case['id'].startswith('sky-'))
+          portable = json.loads((root / 'portable-test-result.json').read_text(encoding='utf-8-sig'))
+          assert portable['ok'] and portable['launchedFromExtractedZip'] and not portable['installerUsed']
+          assert portable['animationPreview']['changed'] and portable['animationPreview']['played']
+          assert portable['export']['status'] == 'completed'
+          print('Zorunlu ASR, gökyüzü, bağımsız ZIP, kurulu uygulama, animasyon, export ve SQLite kanıtları doğrulandı.')
           PY
       - name: Eksik Release’i doğrulanmış artefaktlardan oluştur veya mevcut Release’i doğrula
         env:
@@ -326,13 +357,21 @@ jobs:
               release-source/NedenmisStudio-Setup.exe
               release-source/NedenmisStudio-Portable.zip
               release-source/installer-test-result.json
+              release-source/portable-test-result.json
               release-source/chatterbox-test-result.json
+              release-source/sky-production-result.json
               release-source/turkish-quality-result.json
               release-source/turkish-quality-source-result.json
               release-source/build-manifest.json
               release-source/installed-turkish.wav
               release-source/installed-four-scenes.mp4
+              release-source/Why-does-the-sky-look-blue.mp4
+              release-source/portable-sky.mp4
+              release-source/sky-original-subtitles.srt
+              release-source/sky-export-subtitles.ass
             )
+            mapfile -d '' -t sky_wavs < <(find release-source -maxdepth 1 -type f -name 'sky-*.wav' -print0)
+            assets+=("${sky_wavs[@]}")
             mapfile -d '' -t videos < <(find release-evidence/exports -maxdepth 1 -type f -name '*.mp4' -print0)
             assets+=("${videos[@]}")
             set +e
@@ -352,7 +391,7 @@ jobs:
           release = json.load(open('source-release.json', encoding='utf-8'))
           assert release['targetCommitish'] == run['headSha'], 'Release hedef commiti test run’ı ile eşleşmiyor.'
           names = {asset['name'] for asset in release['assets']}
-          required = {'NedenmisStudio-Setup.exe', 'NedenmisStudio-Portable.zip', 'build-manifest.json', 'turkish-quality-result.json', 'installed-turkish.wav', 'installed-four-scenes.mp4'}
+          required = {'NedenmisStudio-Setup.exe', 'NedenmisStudio-Portable.zip', 'build-manifest.json', 'turkish-quality-result.json', 'installed-turkish.wav', 'installed-four-scenes.mp4', 'sky-production-result.json', 'portable-test-result.json', 'Why-does-the-sky-look-blue.mp4', 'portable-sky.mp4'}
           assert required <= names, f'Release assetleri eksik: {required - names}'
           print(f"Doğrulanmış Release: {release['url']}")
           PY
@@ -365,7 +404,7 @@ jobs:
             --directory release-source \
             --output release-drive/drive-upload-result.json \
             --source-run-id "$SOURCE_RUN_ID" \
-            --files NedenmisStudio-Setup.exe NedenmisStudio-Portable.zip build-manifest.json installer-test-result.json turkish-quality-result.json installed-turkish.wav installed-four-scenes.mp4
+            --files NedenmisStudio-Setup.exe NedenmisStudio-Portable.zip build-manifest.json installer-test-result.json portable-test-result.json sky-production-result.json turkish-quality-result.json installed-turkish.wav installed-four-scenes.mp4 Why-does-the-sky-look-blue.mp4 portable-sky.mp4
       - name: Drive bağlantılarını PR raporuna yaz
         env:
           GH_TOKEN: ${{ github.token }}
