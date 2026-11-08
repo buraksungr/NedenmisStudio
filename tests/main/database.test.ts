@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppDatabase } from '../../electron/main/infrastructure/database/Database.js';
 import { ProjectRepository } from '../../electron/main/infrastructure/database/ProjectRepository.js';
 import { MediaRepository } from '../../electron/main/infrastructure/database/MediaRepository.js';
@@ -7,13 +7,14 @@ import { ExportRepository } from '../../electron/main/infrastructure/database/Ex
 import { projectInput } from '../helpers.js';
 
 let database: AppDatabase;
-beforeEach(() => { database = new AppDatabase(':memory:'); }); afterEach(() => database.close());
+beforeEach(() => { database = new AppDatabase(':memory:'); }); afterEach(() => { database.close(); vi.useRealTimers(); });
 
 describe('SQLite kalıcılığı ve depolar', () => {
   it('migrasyonları ve WAL uyumlu tabloları oluşturur', () => { expect(database.connection.pragma('user_version', { simple: true })).toBe(1); const tables = database.connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>; expect(tables.map((table) => table.name)).toEqual(expect.arrayContaining(['projects', 'media', 'settings', 'exports'])); });
   it('proje oluşturur, otomatik kayıt verisini günceller, çoğaltır, adlandırır ve siler', () => {
+    vi.useFakeTimers(); vi.setSystemTime('2026-01-01T00:00:00.000Z');
     const repository = new ProjectRepository(database); const project = repository.create(projectInput()); expect(project.id).toMatch(/^project_/); expect(project.brand?.channelName).toBe('Nedenmiş');
-    project.script = 'Türkçe ışık açıklaması.'; const saved = repository.update(project); expect(repository.get(project.id).script).toBe('Türkçe ışık açıklaması.'); expect(saved.updatedAt).not.toBe(project.createdAt);
+    project.script = 'Türkçe ışık açıklaması.'; vi.advanceTimersByTime(1); const saved = repository.update(project); expect(repository.get(project.id).script).toBe('Türkçe ışık açıklaması.'); expect(saved.updatedAt).not.toBe(project.createdAt);
     const duplicate = repository.duplicate(project.id); expect(duplicate.id).not.toBe(project.id); expect(duplicate.name).toContain('kopya');
     expect(repository.rename(project.id, 'Yeni ışık hikâyesi').name).toBe('Yeni ışık hikâyesi'); expect(repository.list()).toHaveLength(2); expect(repository.stats().projectCount).toBe(2);
     repository.remove(duplicate.id); expect(repository.list()).toHaveLength(1); repository.remove(project.id); expect(repository.list()).toHaveLength(0);
