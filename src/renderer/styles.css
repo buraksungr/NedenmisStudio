@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --canvas: 244 245 241; --panel: 255 255 255; --raised: 250 251 248; --ink: 25 32 28; --muted: 108 118 111; --accent: 77 111 42; --accent-soft: 228 239 213; color-scheme: light; }
+.dark { --canvas: 16 20 17; --panel: 25 31 27; --raised: 31 38 33; --ink: 237 241 236; --muted: 151 161 153; --accent: 216 255 101; --accent-soft: 46 59 37; color-scheme: dark; }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgb(var(--muted) / .25) transparent; }
+html, body, #root { margin: 0; min-width: 100%; min-height: 100%; height: 100%; overflow: hidden; }
+body { background: rgb(var(--canvas)); color: rgb(var(--ink)); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+button, input, textarea, select { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgb(var(--accent) / .7); outline-offset: 2px; }
+::selection { background: rgb(var(--accent) / .25); }
+
+@layer components {
+  .panel { @apply rounded-2xl bg-panel shadow-card; }
+  .raised { @apply rounded-xl bg-raised; }
+  .label { @apply mb-2 block text-[11px] font-semibold uppercase tracking-[.12em] text-muted; }
+  .input { @apply w-full rounded-xl bg-raised px-3.5 py-3 text-sm text-ink placeholder:text-muted/60 border border-transparent focus:border-accent/30 focus:outline-none transition-colors; }
+  .input-sm { @apply rounded-lg bg-raised px-2.5 py-2 text-xs text-ink border border-transparent focus:border-accent/30 focus:outline-none; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 disabled:opacity-45 disabled:pointer-events-none active:scale-[.98]; }
+  .btn-primary { @apply btn bg-accent text-[#17210f] hover:brightness-105 shadow-sm; }
+  .dark .btn-primary { color: #17210f; }
+  .btn-secondary { @apply btn bg-raised text-ink hover:bg-accent-soft; }
+  .btn-ghost { @apply btn text-muted hover:text-ink hover:bg-raised; }
+  .btn-danger { @apply btn bg-red-500/10 text-red-500 hover:bg-red-500/15; }
+  .icon-btn { @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-raised hover:text-ink disabled:opacity-40 disabled:pointer-events-none; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium; }
+  .divider { @apply h-px bg-muted/10; }
+  .nav-item { @apply flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-medium text-muted transition-all hover:bg-raised hover:text-ink; }
+  .nav-item.active { @apply bg-accent-soft text-ink; }
+  .section-title { @apply text-lg font-semibold tracking-[-.025em] text-ink; }
+  .subtle { @apply text-sm leading-6 text-muted; }
+  .range { @apply h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted/15 accent-accent; }
+  .range::-webkit-slider-thumb { @apply h-4 w-4 appearance-none rounded-full bg-accent shadow; }
+  .timeline-clip { @apply absolute top-1.5 h-[52px] cursor-pointer overflow-hidden rounded-lg transition-colors select-none; }
+}
+
+.text-balance { text-wrap: balance; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+.scrollbar-thin::-webkit-scrollbar { width: 5px; height: 5px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgb(var(--muted) / .22); border-radius: 99px; }
+.preview-vignette { background: radial-gradient(circle at 50% 35%, transparent 30%, rgb(0 0 0 / .18) 100%); }
+.grid-paper { background-image: linear-gradient(rgb(var(--muted) / .055) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--muted) / .055) 1px, transparent 1px); background-size: 32px 32px; }
+.skeleton { background: linear-gradient(90deg, rgb(var(--raised)), rgb(var(--muted) / .1), rgb(var(--raised))); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes pulse-soft { 50% { opacity: .5; } }
+.pulse-soft { animation: pulse-soft 1.8s ease-in-out infinite; }

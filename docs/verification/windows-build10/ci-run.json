@@ -1,0 +1,22 @@
+{
+  "runId": 42375347063,
+  "runUrl": "https://github.com/buraksungr/NedenmisStudio/actions/runs/42375347063",
+  "conclusion": "success",
+  "startedAt": "2026-11-07T13:05:26Z",
+  "completedAt": "2026-11-07T13:31:55Z",
+  "sourceCommit": "89fb12d9da82750a3a15937b5306b9e2856e00b0",
+  "testedPullRequestMergeCommit": "dc332224942fc51c3401f9382dbf22d84fa778b0",
+  "release": "https://github.com/buraksungr/NedenmisStudio/releases/tag/windows-v1.1.0-build10",
+  "setup": {
+    "name": "NedenmisStudio-Setup.exe",
+    "bytes": 294069518,
+    "sha256": "2464b16e40d699f1ff734fc78d20f1947fe6aba31f54bcbd3c10fe6bf3b8996a"
+  },
+  "portable": {
+    "name": "NedenmisStudio-Portable.zip",
+    "bytes": 398988766,
+    "sha256": "c0cf590e3f9cfd7de78b22cb6bd60ce169604bf69e20a1eba84b535680679c46"
+  },
+  "windowsX64ArtifactId": 13576750005,
+  "testEvidenceArtifactId": 13576331181
+}
