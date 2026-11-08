@@ -80,7 +80,8 @@ describe.skipIf(!enabled)('Gökyüzü neden mavi görünür? — gerçek üretim
         expect(result.engine?.checkpoint).toBe('t3_mtl23ls_v3.safetensors'); expect(result.engine?.unknownTokens).toBe(0); expect(result.engine?.decodedText).toContain('[tr]');
         waveforms.push(await inspectWav(audio));
         numberResults.push({ id: testCase.id, originalText: testCase.text, normalizedText: result.ttsText!, audio, duration: result.duration, engine: result.engine });
-        qualityCases.push({ id: testCase.id, audio, text: result.ttsText!, required: true });
+        // ASR, üretilen TTS kopyasını değil kullanıcının özgün metnini bağımsız kanonlaştırır.
+        qualityCases.push({ id: testCase.id, audio, text: testCase.text, required: true });
         await appendQualityCases(process.env.NEDENMIS_TURKISH_QUALITY_MANIFEST, qualityCases);
       }
 
@@ -107,13 +108,16 @@ describe.skipIf(!enabled)('Gökyüzü neden mavi görünür? — gerçek üretim
       const starts = sceneStartTimes(narrated.scenes);
       for (let index = 0; index < narrated.scenes.length; index += 1) {
         const scene = narrated.scenes[index]; const audio = join(proof, `sky-scene-${index + 1}-narration.wav`); await copyFile(scene.narrationPath!, audio);
-        waveforms.push(await inspectWav(audio)); qualityCases.push({ id: `sky-scene-${index + 1}-narration`, audio, text: scene.ttsText!, required: true });
+        waveforms.push(await inspectWav(audio)); qualityCases.push({ id: `sky-scene-${index + 1}-narration`, audio, text: scene.narration, required: true });
         expect(scene.subtitles.length).toBeGreaterThan(0); expect(scene.subtitles.map((cue) => cue.text).join(' ')).toBe(scene.narration);
         scene.subtitles.forEach((cue) => { expect(cue.start).toBeGreaterThanOrEqual(starts[index] - .01); expect(cue.end).toBeLessThanOrEqual(starts[index] + scene.duration + .01); });
         const asset = join(proof, `sky-scene-${index + 1}-asset.png`); await copyFile(scene.assetPath!, asset);
       }
       expect(narrated.scenes.at(-1)!.subtitles.map((cue) => cue.text).join(' ')).toBe(scripted.scriptSections!.conclusion);
-      const srt = originalSrt(narrated); expect(srt).toContain('450 nanometre'); expect(srt).not.toContain('dört yüz elli nanometre'); expect(srt).toContain(scripted.scriptSections!.conclusion);
+      const srt = originalSrt(narrated);
+      const srtSpeech = srt.trim().split(/\r?\n\r?\n/).map((block) => block.split(/\r?\n/).slice(2).join(' ')).join(' ');
+      expect(srt).toContain('450 nanometre'); expect(srt).not.toContain('dört yüz elli nanometre');
+      expect(srtSpeech).toBe(narrated.scenes.map((scene) => scene.narration).join(' ')); expect(srtSpeech).toContain(scripted.scriptSections!.conclusion);
       await writeFile(join(proof, 'sky-original-subtitles.srt'), srt, 'utf8'); await context.subtitles.write(narrated, join(proof, 'sky-export-subtitles.ass'));
       await appendQualityCases(process.env.NEDENMIS_TURKISH_QUALITY_MANIFEST, qualityCases);
 
@@ -141,7 +145,7 @@ describe.skipIf(!enabled)('Gökyüzü neden mavi görünür? — gerçek üretim
       expect(videoStream.nb_read_frames).toBe(String(expectedFrames)); expect(Number(videoStream.duration)).toBeCloseTo(expectedFrames / 30, 1);
       expect(audioStream.codec_name).toBe('aac'); expect(Number(audioStream.sample_rate)).toBe(48000); expect(Number(audioStream.channels)).toBe(2);
       expect(Math.abs(Number(streamInfo.format.duration) - totalDuration(persisted.scenes))).toBeLessThan(.5);
-      qualityCases.push({ id: 'sky-exported-animated-mp4', audio: output, text: persisted.scenes.map((scene) => scene.ttsText).join(' '), required: true });
+      qualityCases.push({ id: 'sky-exported-animated-mp4', audio: output, text: persisted.scenes.map((scene) => scene.narration).join(' '), required: true });
 
       const sceneMotion: Array<Record<string, unknown>> = [];
       for (let index = 0; index < persisted.scenes.length; index += 1) {

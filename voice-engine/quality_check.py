@@ -21,8 +21,115 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
+ONES = ("", "bir", "iki", "üç", "dört", "beş", "altı", "yedi", "sekiz", "dokuz")
+TENS = ("", "on", "yirmi", "otuz", "kırk", "elli", "altmış", "yetmiş", "seksen", "doksan")
+SCALES = ("", "bin", "milyon", "milyar", "trilyon", "katrilyon", "kentilyon", "seksilyon", "septilyon", "oktilyon", "nonilyon", "desilyon")
+MONTHS = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
+# A hyphen between two numbers is commonly a Whisper list separator, not a minus sign.
+NUMBER = r"(?<![\w.])[+-]?\d+(?:\.\d+)*(?:,\d+)?"
+CURRENCIES = {"₺": "lira", "tl": "lira", "try": "lira", "$": "dolar", "usd": "dolar", "€": "avro", "eur": "avro", "euro": "avro", "£": "sterlin", "gbp": "sterlin", "lira": "lira", "dolar": "dolar", "avro": "avro", "sterlin": "sterlin"}
+UNITS = {
+    "km/s": "kilometre bölü saniye", "m/s": "metre bölü saniye", "kwh": "kilovat saat", "khz": "kilohertz", "mhz": "megahertz", "ghz": "gigahertz",
+    "km": "kilometre", "cm": "santimetre", "mm": "milimetre", "nm": "nanometre", "kg": "kilogram", "mg": "miligram", "ml": "mililitre",
+    "tb": "terabayt", "gb": "gigabayt", "mb": "megabayt", "kb": "kilobayt", "kw": "kilovat", "kpa": "kilopaskal", "hpa": "hektopaskal",
+    "hz": "hertz", "sn": "saniye", "dk": "dakika", "sa": "saat", "pa": "paskal", "°c": "derece", "°f": "derece Fahrenhayt",
+    "m": "metre", "g": "gram", "l": "litre", "s": "saniye", "w": "vat", "v": "volt", "a": "amper",
+}
+
+
+def integer_words(raw: str | int) -> str:
+    token = re.sub(r"\s+", "", str(raw))
+    if not re.fullmatch(r"[+-]?\d+", token):
+        raise ValueError(f"Tam sayı okunamıyor: {token}")
+    value = int(token)
+    negative = value < 0
+    value = abs(value)
+    if value == 0:
+        return "sıfır"
+    groups = []
+    while value:
+        groups.append(value % 1000)
+        value //= 1000
+    if len(groups) > len(SCALES):
+        raise ValueError("Sayı Türkçe ölçek adı sınırını aşıyor.")
+    parts = []
+    for index in range(len(groups) - 1, -1, -1):
+        group = groups[index]
+        if not group:
+            continue
+        hundreds, rest = divmod(group, 100)
+        below = " ".join(part for part in ((f"{ONES[hundreds]} " if hundreds > 1 else "") + ("yüz" if hundreds else ""), TENS[rest // 10], ONES[rest % 10]) if part)
+        parts.append("bin" if index == 1 and group == 1 else below + (f" {SCALES[index]}" if index else ""))
+    return ("eksi " if negative else "") + " ".join(parts)
+
+
+def decimal_words(raw: str) -> str:
+    token = re.sub(r"\s+", "", raw)
+    sign = ""
+    if token.startswith(("+", "-")):
+        sign = "eksi " if token[0] == "-" else "artı "
+        token = token[1:]
+    integer_part = token.split(",")[0]
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", integer_part):
+        token = token.replace(".", "")
+    elif re.fullmatch(r"\d+\.\d+", integer_part):
+        token = token.replace(".", ",", 1)
+    elif "." in integer_part:
+        return sign + " nokta ".join(decimal_words(part) for part in token.split("."))
+    parts = token.split(",")
+    result = sign + integer_words(parts[0] or "0")
+    if len(parts) > 1:
+        fraction = parts[1]
+        leading_zeroes = len(fraction) - len(fraction.lstrip("0"))
+        remainder = fraction[leading_zeroes:]
+        fraction_words = ("sıfır " * leading_zeroes + integer_words(remainder)) if remainder else "sıfır"
+        result += " virgül " + fraction_words
+    return result
+
+
+def date_words(day: int, month: int, year: int) -> str:
+    return f"{integer_words(day)} {MONTHS[month - 1]} {integer_words(year)}"
+
+
+def spoken_number_canonical(source: str) -> str:
+    """Canonicalize visible and Whisper-written Turkish numbers without changing audio."""
+    text = unicodedata.normalize("NFC", source)
+
+    def iso_date(match: re.Match[str]) -> str:
+        year, month, day = (int(value) for value in match.groups())
+        return date_words(day, month, year) if 1 <= day <= 31 and 1 <= month <= 12 else match.group(0)
+
+    def local_date(match: re.Match[str]) -> str:
+        day, month, year = (int(value) for value in match.groups())
+        return date_words(day, month, year) if 1 <= day <= 31 and 1 <= month <= 12 else match.group(0)
+
+    text = re.sub(r"\b(\d{4})-([01]?\d)-([0-3]?\d)\b", iso_date, text)
+    text = re.sub(r"\b([0-3]?\d)[./-]([01]?\d)[./-](\d{4})\b", local_date, text)
+
+    def clock(match: re.Match[str]) -> str:
+        hour, minute = int(match.group(2)), int(match.group(3))
+        minutes = "" if minute == 0 else f" {'sıfır ' if match.group(3).startswith('0') else ''}{integer_words(minute)}"
+        return f"saat {integer_words(hour)}{minutes}"
+
+    text = re.sub(r"\b(saat\s+)?([01]?\d|2[0-3])[:.]([0-5]\d)\b", clock, text, flags=re.IGNORECASE)
+    text = re.sub(r"%\s*(" + NUMBER + ")", lambda match: "yüzde " + decimal_words(match.group(1)), text)
+    text = re.sub("(" + NUMBER + r")\s*%", lambda match: "yüzde " + decimal_words(match.group(1)), text)
+    text = re.sub(r"(₺|\$|€|£)\s*(" + NUMBER + ")", lambda match: f"{decimal_words(match.group(2))} {CURRENCIES[match.group(1).lower()]}", text)
+    currency_names = "|".join(re.escape(key) for key in sorted((key for key in CURRENCIES if len(key) > 1), key=len, reverse=True))
+    text = re.sub("(" + NUMBER + r")\s*(" + currency_names + "|₺)", lambda match: f"{decimal_words(match.group(1))} {CURRENCIES[match.group(2).lower()]}", text, flags=re.IGNORECASE)
+    unit_pattern = "|".join(re.escape(key) for key in sorted(UNITS, key=len, reverse=True))
+    text = re.sub("(" + NUMBER + r")\s*(" + unit_pattern + r")\b", lambda match: f"{decimal_words(match.group(1))} {UNITS[match.group(2).lower()]}", text, flags=re.IGNORECASE)
+    text = re.sub("(" + NUMBER + r")[eE]([+-]?\d+)", lambda match: f"{decimal_words(match.group(1))} çarpı on üssü {integer_words(match.group(2))}", text)
+    for symbol, words in (("±", " artı eksi "), ("×", " çarpı "), ("*", " çarpı "), ("≤", " küçük eşittir "), ("≥", " büyük eşittir "), ("≠", " eşit değildir "), ("≈", " yaklaşık "), ("∞", " sonsuz "), ("/", " bölü "), ("+", " artı "), ("^", " üssü "), ("=", " eşittir "), (">", " büyüktür "), ("<", " küçüktür ")):
+        text = text.replace(symbol, words)
+    text = re.sub(r"(?<=\d)\s*[xX]\s*(?=\d)", " çarpı ", text)
+    text = re.sub(r"(?<=\d)\s+-\s+(?=\d)", " eksi ", text)
+    text = re.sub(NUMBER, lambda match: decimal_words(match.group(0)), text)
+    return " ".join(text.split())
+
+
 def normalized(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text).casefold()
+    text = unicodedata.normalize("NFKD", spoken_number_canonical(text)).casefold()
     text = "".join(char for char in text if not unicodedata.combining(char))
     text = "".join(char if char.isalnum() else " " for char in text)
     return " ".join(text.split())
@@ -40,18 +147,33 @@ def distance(reference: str, candidate: str) -> int:
     return previous[-1]
 
 
-def scores(expected: str, transcript: str) -> dict[str, float | int]:
+def word_distance(reference: list[str], candidate: list[str]) -> int:
+    """True word error rate distance, rather than character distance divided by words."""
+    if not reference:
+        return len(candidate)
+    previous = list(range(len(candidate) + 1))
+    for i, left in enumerate(reference, 1):
+        current = [i]
+        for j, right in enumerate(candidate, 1):
+            current.append(min(current[-1] + 1, previous[j] + 1, previous[j - 1] + (left != right)))
+        previous = current
+    return previous[-1]
+
+
+def scores(expected: str, transcript: str) -> dict[str, float | int | str]:
     wanted = normalized(expected)
     actual = normalized(transcript)
     wanted_words, actual_words = wanted.split(), actual.split()
     char_distance = distance(wanted, actual)
-    word_distance = distance(" ".join(wanted_words), " ".join(actual_words))
+    edit_words = word_distance(wanted_words, actual_words)
     return {
         "cer": char_distance / max(1, len(wanted)),
-        "wer": word_distance / max(1, len(wanted_words)),
+        "wer": edit_words / max(1, len(wanted_words)),
         "referenceCharacters": len(wanted),
         "referenceWords": len(wanted_words),
         "transcriptWords": len(actual_words),
+        "normalizedReference": wanted,
+        "normalizedTranscript": actual,
     }
 
 

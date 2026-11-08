@@ -166,7 +166,9 @@ jobs:
             foreach ($case in $quality.cases) {
               $expected = ([string]$case.expectedText).Replace('|', '\|')
               $transcript = ([string]$case.transcript).Replace('|', '\|')
-              $lines += "", "<details><summary>$($case.id) — transkript</summary>", "", "**Beklenen:** $expected", "", "**ASR:** $transcript", "", "</details>"
+              $lines += "", "<details><summary>$($case.id) — transkript</summary>", "", "**Beklenen:** $expected", "", "**ASR:** $transcript"
+              if ($case.normalizedReference) { $lines += "", "**Kanon referans:** $($case.normalizedReference)", "", "**Kanon ASR:** $($case.normalizedTranscript)" }
+              $lines += "", "</details>"
             }
             if (Test-Path release/turkish-ab-progress.json) {
               $ab = Get-Content release/turkish-ab-progress.json -Raw | ConvertFrom-Json
