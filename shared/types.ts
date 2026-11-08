@@ -4,7 +4,7 @@ export type VisualStyle = 'belgesel' | 'minimal' | 'infografik' | 'sinematik' | 
 export type NarrationStyle = 'belgesel' | 'samimi' | 'enerjik' | 'sakin';
 export type TransitionType = 'fade' | 'dissolve' | 'slide' | 'none';
 export type CameraMovement = 'static' | 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right';
-export type AnimationPreset = 'auto' | 'liquid-molecules' | 'crystallization' | 'lattice-expansion' | 'floating-ice' | 'orbital' | 'galaxy' | 'cellular' | 'energy-waves' | 'geological' | 'weather-systems' | 'river-flow' | 'reaction' | 'neural' | 'data-flow' | 'generic-particles';
+export type AnimationPreset = 'auto' | 'light-scattering' | 'liquid-molecules' | 'crystallization' | 'lattice-expansion' | 'floating-ice' | 'orbital' | 'galaxy' | 'cellular' | 'energy-waves' | 'geological' | 'weather-systems' | 'river-flow' | 'reaction' | 'neural' | 'data-flow' | 'generic-particles';
 export interface SceneAnimationSettings {
   enabled: boolean;
   preset: AnimationPreset;
@@ -27,10 +27,20 @@ export interface SubtitleCue {
   emphasis?: string[];
 }
 
+export interface ScriptSections {
+  hook: string;
+  explanation: string;
+  conclusion: string;
+}
+export type SceneSection = keyof ScriptSections | 'intro' | 'outro';
+
 export interface Scene {
   id: string;
   number: number;
   narration: string;
+  /** Orijinal anlatım korunur; yalnızca TTS sağlayıcısına gönderilen sayı/sembol normalize metni. */
+  ttsText?: string;
+  section?: SceneSection;
   visualDescription: string;
   visualPrompt: string;
   assetPath?: string;
@@ -99,6 +109,8 @@ export interface Project {
   narrationStyle: NarrationStyle;
   visualStyle: VisualStyle;
   script: string;
+  /** Üretim ve elle düzenleme sonrası üç mantıksal bölüm; eski projelerde sonradan hidratlanır. */
+  scriptSections?: ScriptSections;
   scenes: Scene[];
   research: ResearchResult;
   audio: AudioSettings;
@@ -276,6 +288,8 @@ export interface TtsRequest {
 
 export interface TtsResult {
   path: string;
+  /** Orijinal metnin yerine geçmez; TTS'e gönderilen ayrı normalize metindir. */
+  ttsText?: string;
   duration: number;
   providerId: string;
   timingMode: TimingMode;

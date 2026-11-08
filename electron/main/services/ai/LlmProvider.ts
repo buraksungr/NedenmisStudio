@@ -1,7 +1,7 @@
-import type { ConnectionTestResult, NarrationStyle, Project, ResearchResult } from '../../../../shared/types.js';
+import type { ConnectionTestResult, NarrationStyle, Project, ResearchResult, SceneSection } from '../../../../shared/types.js';
 
 export interface ScriptGenerationInput { topic: string; category: string; targetDuration: number; narrationStyle: NarrationStyle; instructions: string; research: ResearchResult }
-export interface SceneDirection { narration: string; visualDescription: string; visualPrompt: string }
+export interface SceneDirection { narration: string; visualDescription: string; visualPrompt: string; section?: SceneSection }
 
 export interface LlmProvider {
   readonly id: string;

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clapperboard, FileText, Image, Link2, LoaderCircle, Mic2, RefreshCw, Search, Sparkles, Wand2 } from 'lucide-react';
-import type { NarrationStyle, Project, ProjectMode, ResearchResult, TopicSuggestion, VisualStyle } from '@shared/types';
+import type { NarrationStyle, Project, ProjectMode, ResearchResult, ScriptSections, TopicSuggestion, VisualStyle } from '@shared/types';
 import { estimateSpeechDuration } from '@shared/utils';
+import { composeScript, parseScriptSections } from '@shared/script';
 import { useStudio } from '../store/StudioContext';
 import { Badge, Button, Card, Field, Notice } from '../components/ui';
 
@@ -14,9 +15,24 @@ export function CreateVideo() {
   const initial = (() => { try { return JSON.parse(sessionStorage.getItem('nedenmis:new-video') || '{}'); } catch { return {}; } })();
   const [mode, setMode] = useState<ProjectMode>(initial.mode || 'automatic'); const [topic, setTopic] = useState(initial.topic || ''); const [category, setCategory] = useState(initial.category || 'Otomatik');
   const [instructions, setInstructions] = useState(''); const [duration, setDuration] = useState(45); const [narrationStyle, setNarrationStyle] = useState<NarrationStyle>('belgesel'); const [visualStyle, setVisualStyle] = useState<VisualStyle>('infografik');
-  const [topics, setTopics] = useState<TopicSuggestion[]>([]); const [step, setStep] = useState(1); const [project, setProject] = useState<Project>(); const [script, setScript] = useState(''); const [working, setWorking] = useState(''); const [selectionVersion, setSelectionVersion] = useState(0); const scriptRef = useRef<HTMLTextAreaElement>(null);
+  const [topics, setTopics] = useState<TopicSuggestion[]>([]); const [step, setStep] = useState(1); const [project, setProject] = useState<Project>(); const [script, setScript] = useState(''); const [sections, setSections] = useState<ScriptSections>({ hook: '', explanation: '', conclusion: '' }); const [working, setWorking] = useState(''); const [selectionVersion, setSelectionVersion] = useState(0); const scriptRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { sessionStorage.removeItem('nedenmis:new-video'); void window.nedenmis.topics.discover(category).then(setTopics); }, [category]);
-  useEffect(() => { if (project) setScript(project.script); }, [project?.id, project?.script]);
+  useEffect(() => {
+    if (!project) return;
+    setScript(project.script);
+    try { setSections(parseScriptSections(project.script)); }
+    catch { setSections(project.scriptSections || { hook: '', explanation: '', conclusion: '' }); }
+  }, [project?.id, project?.script]);
+
+  const changeScript = (value: string) => {
+    setScript(value);
+    try { setSections(parseScriptSections(value)); } catch { /* Yazım sürerken eksik bölümler korunur. */ }
+  };
+  const changeSection = (key: keyof ScriptSections, value: string) => {
+    const next = { ...sections, [key]: value }; setSections(next); setScript(composeScript(next));
+  };
+  let sectionsComplete = true;
+  try { if (script.trim()) parseScriptSections(script); } catch { sectionsComplete = false; }
 
   const create = async () => {
     const selected = topic.trim() || topics[0]?.title; if (!selected) { toast('Önce bir konu seçin veya yazın.', 'error'); return; }
@@ -32,7 +48,7 @@ export function CreateVideo() {
     if (!project || !scriptRef.current) return; const element = scriptRef.current; const start = element.selectionStart; const end = element.selectionEnd; const selected = script.slice(start, end);
     if (!selected.trim()) { toast('Yeniden yazmak için önce metin seçin.', 'info'); return; }
     const replacement = await run('Metin yeniden yazılıyor', () => window.nedenmis.ai.rewrite({ projectId: project.id, selectedText: selected, instruction }));
-    const nextScript = `${script.slice(0, start)}${replacement}${script.slice(end)}`; setScript(nextScript); const next = { ...project, script: nextScript }; setProject(next); await window.nedenmis.projects.update(next); toast('Seçili metin güncellendi.', 'success');
+    const nextScript = `${script.slice(0, start)}${replacement}${script.slice(end)}`; changeScript(nextScript); const next = { ...project, script: nextScript }; setProject(next); await window.nedenmis.projects.update(next); toast('Seçili metin güncellendi.', 'success');
   };
   const generateScenes = async () => { if (!project) return; await saveScript(); setWorking('Sahne yönetmeni çalışıyor'); try { const next = await run('Sahne planı', () => window.nedenmis.ai.generateScenes(project.id), 'Sahne planı ve altyazı zamanlaması hazır.'); setProject(next); setActiveProject(next); setStep(3); } finally { setWorking(''); } };
   const generateVisuals = async () => { if (!project) return; setWorking('Sahneler çiziliyor'); try { const next = await run('Görsel üretimi', () => window.nedenmis.visuals.generateAll(project.id), 'Tüm sahne görselleri üretildi.'); setProject(next); setActiveProject(next); setStep(4); } finally { setWorking(''); } };
@@ -54,7 +70,11 @@ export function CreateVideo() {
       {step === 2 && project && <motion.div key="script" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1.5fr)_320px] gap-5 pb-2">
         <Card className="flex min-h-[550px] flex-col p-6"><div className="mb-4 flex items-start justify-between"><div><h2 className="text-lg font-semibold tracking-tight">Anlatım senaryosu</h2><p className="mt-1 text-xs text-muted">{project.topic}</p></div><Badge tone={project.research.status === 'completed' ? 'green' : 'amber'}>{project.research.status === 'completed' ? 'Kaynaklar bağlı' : 'Araştırma gerekli'}</Badge></div>
           <div className="mb-3 flex flex-wrap gap-1.5"><Button variant="secondary" className="px-3 py-2 text-[11px]" disabled={!hasRewriteSelection} onClick={() => void rewrite('improve')}>Akıcılaştır</Button><Button variant="secondary" className="px-3 py-2 text-[11px]" disabled={!hasRewriteSelection} onClick={() => void rewrite('shorten')}>Kısalt</Button><Button variant="secondary" className="px-3 py-2 text-[11px]" disabled={!hasRewriteSelection} onClick={() => void rewrite('hook')}>Kanca yaz</Button><Button variant="secondary" className="px-3 py-2 text-[11px]" disabled={!hasRewriteSelection} onClick={() => void rewrite('conclusion')}>Sonuç yaz</Button><span className="ml-auto self-center text-[10px] text-muted">Yeniden yazmak için metin seçin</span></div>
-          <textarea ref={scriptRef} className="input min-h-[330px] flex-1 resize-none bg-raised/60 p-5 text-[15px] leading-8" placeholder="Senaryonuzu buraya yazın veya sağdaki üretim düğmesini kullanın…" value={script} onChange={(event) => { setScript(event.target.value); setSelectionVersion((value) => value + 1); }} onSelect={() => setSelectionVersion((value) => value + 1)} onBlur={() => void saveScript()} />
+          <textarea ref={scriptRef} className="input min-h-[330px] flex-1 resize-none bg-raised/60 p-5 text-[15px] leading-8" placeholder="Senaryonuzu buraya yazın veya sağdaki üretim düğmesini kullanın…" value={script} onChange={(event) => { changeScript(event.target.value); setSelectionVersion((value) => value + 1); }} onSelect={() => setSelectionVersion((value) => value + 1)} onBlur={() => void saveScript()} />
+          <div className="mt-3 grid grid-cols-3 gap-2" data-testid="script-sections">
+            {([['hook', 'Kanca bölümü', 'Kanca'], ['explanation', 'Ana açıklama bölümü', 'Ana açıklama'], ['conclusion', 'Sonuç bölümü', 'Sonuç']] as const).map(([key, aria, label]) => <label key={key} className="block"><span className="mb-1 block text-[9px] font-semibold uppercase tracking-wider text-accent">{label}</span><textarea aria-label={aria} data-testid={key === 'conclusion' ? 'conclusion-editor' : undefined} className="input min-h-20 w-full resize-y bg-raised/40 p-2 text-[11px] leading-5" value={sections[key]} onChange={(event) => changeSection(key, event.target.value)} onBlur={() => void saveScript()} /></label>)}
+          </div>
+          {!sectionsComplete && <p className="mt-2 text-[10px] leading-4 text-amber-600">Sahne üretimi için kanca, açıklama ve ayrı bir sonuç paragrafı zorunludur.</p>}
           <div className="mt-4 flex items-center justify-between"><span className="text-[11px] text-muted">{script.trim().split(/\s+/).filter(Boolean).length} kelime · yaklaşık {Math.round(estimateSpeechDuration(script || ' ', project.narrationStyle, project.voice.speed))} saniye <span className="ml-1 text-muted/60">(tahmini)</span></span><Button variant="ghost" onClick={() => void saveScript(true)}>Metni kaydet</Button></div>
         </Card>
         <div className="space-y-4"><Card className="p-5"><div className="mb-3 flex items-center gap-2"><Search size={16} className="text-accent" /><h3 className="text-sm font-semibold">Araştırma ve üretim</h3></div><p className="text-xs leading-5 text-muted">Etkin sağlayıcı: <strong className="text-ink">{settings.providers.find((p) => p.id === settings.activeResearchProvider)?.name}</strong></p><div className="mt-4 space-y-2"><Button variant="secondary" className="w-full" icon={BookOpen} loading={working === 'Kaynaklar taranıyor'} onClick={() => void research()}>Araştırmayı çalıştır</Button><Button className="w-full" icon={Sparkles} loading={working === 'Türkçe anlatım yazılıyor'} onClick={() => void generateScript()}>Senaryoyu üret</Button>{mode === 'automatic' && <Button variant="ghost" className="w-full text-[11px]" icon={Wand2} onClick={() => void automaticScript()}>Araştır + senaryoyu hazırla</Button>}</div>{working && <div className="mt-4 flex items-center gap-2 text-[11px] text-muted"><LoaderCircle size={14} className="animate-spin" />{working}</div>}</Card>

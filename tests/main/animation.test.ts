@@ -16,6 +16,18 @@ function meanDifference(a: Buffer, b: Buffer): number {
 }
 
 describe('Gerçek bilimsel nesne animasyonu', () => {
+  it('gökyüzü konusunu orbital yerine hareketli Rayleigh fotonlarına yönlendirir', async () => {
+    const project = sampleProject(); project.topic = 'Gökyüzü neden mavi görünür?';
+    const scene = { ...createIceAnimationProject().scenes[0], narration: 'Güneş ışığı atmosferdeki moleküllerde saçılır.', visualDescription: 'Mavi ışık saçılımı', animation: undefined };
+    expect(resolveAnimationPreset(project, scene)).toBe('light-scattering');
+    const firstSvg = renderAnimatedSceneSvg(project, scene, DEFAULT_IDENTITY, .1);
+    const laterSvg = renderAnimatedSceneSvg(project, scene, DEFAULT_IDENTITY, .9);
+    const photon = (svg: string) => svg.match(/data-light-photon="0"[^>]*transform="([^"]+)/)?.[1];
+    const scattered = (svg: string) => svg.match(/data-scattered-photon="0"[^>]*cx="([^"]+)/)?.[1];
+    expect(photon(firstSvg)).not.toBe(photon(laterSvg)); expect(scattered(firstSvg)).not.toBe(scattered(laterSvg));
+    expect(firstSvg).toContain('data-air-molecule='); expect(meanDifference(await pixels(firstSvg), await pixels(laterSvg))).toBeGreaterThan(.2);
+  });
+
   it('dört buz sahnesini otomatik olarak dört farklı modele ayırır', () => {
     const project = createIceAnimationProject();
     const expected = ['liquid-molecules', 'crystallization', 'lattice-expansion', 'floating-ice'];
@@ -66,7 +78,7 @@ describe('Gerçek bilimsel nesne animasyonu', () => {
   });
 
   it.each([
-    ['orbital', 'orbital'], ['galaxy', 'galaxy'], ['cellular', 'cellular'],
+    ['light-scattering', 'light-scattering'], ['orbital', 'orbital'], ['galaxy', 'galaxy'], ['cellular', 'cellular'],
     ['energy-waves', 'energy-waves'], ['geological', 'geological'],
     ['weather-systems', 'weather-systems'], ['river-flow', 'river-flow'],
     ['reaction', 'reaction'], ['neural', 'neural'], ['data-flow', 'data-flow'],

@@ -9,6 +9,14 @@ import type { LlmProvider, ScriptGenerationInput } from './LlmProvider.js';
 export class LocalScriptProvider implements LlmProvider {
   readonly id = 'local-script'; readonly name = 'Yerel senaryo taslağı';
   async generateScript(input: ScriptGenerationInput): Promise<string> {
+    const normalizedTopic = input.topic.toLocaleLowerCase('tr-TR');
+    if (/gökyüzü.*mavi|mavi.*gökyüzü|sky.*blue|blue.*sky/.test(normalizedTopic)) {
+      return [
+        'Güneş’in ışığı beyaz. Peki gökyüzü neden mavi?',
+        'Beyaz ışık aslında bütün görünür renkleri taşır. Atmosferdeki küçük moleküller, yaklaşık 450 nanometre dalga boyundaki mavi ışığı kırmızıdan çok daha güçlü saçar. Böylece her yönden gözümüze ulaşan ışıkta mavi baskın olur.',
+        'Gökyüzünün rengi, beyaz ışığın atmosferde bize dağıtılmış hâlidir.',
+      ].join('\n\n');
+    }
     const verifiedSnippets = input.research.sources.flatMap((source) => source.claims.map((claim) => claim.text)).filter(Boolean).slice(0, 3);
     const topic = input.topic.replace(/[.!?]+$/, '');
     const paragraphs: string[] = [];

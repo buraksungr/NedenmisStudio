@@ -27,6 +27,19 @@ describe('TTS sağlayıcı yönlendirmesi', () => {
     const result = await service.generateProject(project.id); expect(chatterboxCalls).toHaveLength(2); expect(sapiCalls).toHaveLength(0); expect(chatterboxCalls.every((request) => request.referenceVoicePath === referencePath)).toBe(true); expect(result.scenes.every((scene) => scene.narrationPath?.includes('chatterbox-multilingual-v3'))).toBe(true);
     const preview = await service.preview({ text: 'SAPI seçildi', selection: { providerId: sapi.id, voiceId: 'auto-tr', speed: 1, pitch: 0 } }); expect(preview.providerId).toBe(sapi.id); expect(sapiCalls).toHaveLength(1); expect(chatterboxCalls).toHaveLength(2); db.close();
   });
+  it('sayıları yalnızca TTS kopyasında normalize eder, özgün anlatımı ve altyazıyı korur', async () => {
+    const db = new AppDatabase(':memory:'); const projects = new ProjectRepository(db); const media = new MediaRepository(db); const calls: TtsRequest[] = [];
+    const provider = fakeProvider('chatterbox-multilingual-v3', calls); const service = new TtsService(projects, media, new Map([[provider.id, provider]]), () => directory);
+    const project = projects.create(projectInput()); project.voice = { providerId: provider.id, voiceId: 'reference-tr', speed: 1, pitch: 0 };
+    project.scenes = [{ id: 'numbers', number: 1, narration: '%35 ve 25 km. Yıl 2026.', visualDescription: '', visualPrompt: '', assetType: 'procedural', duration: 4, transition: 'fade', cameraMovement: 'static', subtitles: [], subtitleTiming: 'estimated', status: 'empty' }]; projects.update(project);
+    const result = await service.generateProject(project.id);
+    expect(calls[0].text).toBe('yüzde otuz beş ve yirmi beş kilometre. Yıl iki bin yirmi altı.');
+    expect(result.scenes[0].narration).toBe('%35 ve 25 km. Yıl 2026.');
+    expect(result.scenes[0].ttsText).toBe(calls[0].text);
+    expect(result.scenes[0].subtitles.map((cue) => cue.text).join(' ')).toContain('%35');
+    expect(result.scenes[0].subtitles.map((cue) => cue.text).join(' ')).toContain('2026');
+    db.close();
+  });
   it('gerçek Chatterbox kurulmadan başarı veya alternatif motor sonucu üretmez', async () => {
     const db = new AppDatabase(':memory:'); const settings = new SettingsRepository(db); const referencePath = join(directory, 'reference.wav'); await writeFile(referencePath, 'reference');
     const manager = new VoiceEngineManager(() => directory, join(process.cwd(), 'voice-engine'), settings, new Logger(join(directory, 'logs')), () => referencePath, () => undefined); const provider = new ChatterboxProvider(manager, new FFmpegService(() => undefined), () => directory, () => referencePath);

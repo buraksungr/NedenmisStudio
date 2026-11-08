@@ -1,6 +1,7 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { generateSubtitleCues, sceneStartTimes } from '../../../../shared/utils.js';
+import { normalizeTurkishForTts } from '../../../../shared/turkishTtsNormalization.js';
 import type { Project, TtsRequest, TtsResult, VoiceProviderDetails } from '../../../../shared/types.js';
 import type { ProjectRepository } from '../../infrastructure/database/ProjectRepository.js';
 import type { MediaRepository } from '../../infrastructure/database/MediaRepository.js';
@@ -20,9 +21,10 @@ export class TtsService {
   async preview(request: TtsRequest): Promise<TtsResult> {
     const provider = this.provider(request.selection.providerId); const directory = join(this.storagePath(), 'previews'); await mkdir(directory, { recursive: true });
     const path = join(directory, `ses-onizleme-${Date.now()}.${extensionFor(provider.id)}`);
-    const result = await provider.synthesize({ ...request, referenceVoicePath: this.reference() }, path); const info = await stat(path);
+    const ttsText = normalizeTurkishForTts(request.text);
+    const result = await provider.synthesize({ ...request, text: ttsText, referenceVoicePath: this.reference() }, path); const info = await stat(path);
     this.media.upsertByPath({ kind: 'narration', name: 'Ses önizlemesi', path, mimeType: mimeFor(provider.id), size: info.size, duration: result.duration });
-    return { ...result, path, providerId: provider.id };
+    return { ...result, path, providerId: provider.id, ttsText };
   }
   async generateProject(projectId: string): Promise<Project> {
     const project = this.projects.get(projectId); if (!project.scenes.length) throw new Error('Seslendirilecek sahne bulunamadı.');
@@ -31,7 +33,8 @@ export class TtsService {
       if (!scene.narration.trim()) continue;
       const path = join(directory, `${scene.id}-${provider.id}-${Date.now()}.${extensionFor(provider.id)}`);
       try {
-        const result = await provider.synthesize({ text: scene.narration, selection: project.voice, referenceVoicePath: this.reference() }, path);
+        scene.ttsText = normalizeTurkishForTts(scene.narration);
+        const result = await provider.synthesize({ text: scene.ttsText, selection: project.voice, referenceVoicePath: this.reference() }, path);
         scene.narrationPath = path; scene.narrationDuration = result.duration; scene.duration = Math.max(1, Number((result.duration + .22).toFixed(3)));
         scene.subtitleTiming = result.timingMode; (scene as typeof scene & { alignedCues?: unknown }).alignedCues = result.cues;
         const info = await stat(path); this.media.upsertByPath({ kind: 'narration', name: `${project.name} · Sahne ${scene.number}`, path, mimeType: mimeFor(provider.id), size: info.size, duration: result.duration, projectId: project.id });

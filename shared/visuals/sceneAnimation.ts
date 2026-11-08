@@ -3,6 +3,7 @@ import { buildArtworkSvg, diagramFor } from './sceneArtwork.js';
 
 export const ANIMATION_PRESETS: { id: AnimationPreset; label: string }[] = [
   { id: 'auto', label: 'Konuya göre otomatik' },
+  { id: 'light-scattering', label: 'Işık ve Rayleigh saçılımı' },
   { id: 'liquid-molecules', label: 'Sıvı molekülleri ve akış' },
   { id: 'crystallization', label: 'Kristalleşme ve bağ kurma' },
   { id: 'lattice-expansion', label: 'Kristal kafes ve hacim artışı' },
@@ -31,6 +32,8 @@ export function resolveAnimationPreset(project: Project, scene: Scene): Exclude<
   const topicText = project.topic.toLocaleLowerCase('tr-TR');
   const sceneAboutWater = /buz|su\b|molekül|yoğun|kristal|donma|donar|yüzer|ice|water|molecule|density|crystal|freez|float/i.test(sceneText);
   const text = sceneAboutWater ? sceneText : `${topicText} ${sceneText}`;
+  const skyScattering = ((/gökyüzü|rayleigh|atmosfer/i.test(text) && /mavi|ışık|güneş|saçıl|dalga boyu/i.test(text)) || /mavi ışık|kısa dalga boyu|ışık saç/i.test(text));
+  if (skyScattering) return 'light-scattering';
   const water = /buz|su\b|molekül|yoğun|kristal|donma|donar|yüzer|ice|water|molecule|density|crystal|freez|float/i.test(text);
   if (water && /yüzer|yüzme|yüzüyor|kaldırma|float|buoy/i.test(text)) return 'floating-ice';
   if (water && /donma|donar|donuk|freeze|freezing|solidif/i.test(text)) return 'crystallization';
@@ -86,6 +89,47 @@ function wave(y: number, amplitude: number, phase: number, color: string, width 
 }
 function label(text: string, x = 540, y = 1450): string {
   return `<g font-family="Inter,Arial,sans-serif" text-anchor="middle"><rect x="${x - 220}" y="${y - 43}" width="440" height="66" rx="33" fill="#111D1A" stroke="#FFFFFF" stroke-opacity=".13"/><text x="${x}" y="${y}" fill="#DCE9E3" font-size="24" letter-spacing="2">${text}</text></g>`;
+}
+function lightScattering(scene: Scene, t: number, duration: number, accent: string, settings: ResolvedAnimation): string {
+  const moleculeCount = Math.max(10, Math.min(26, Math.round(settings.particleCount * .75)));
+  const origins = Array.from({ length: moleculeCount }, (_, i) => ({
+    x: 390 + hash(scene.id, i + 1100) * 500 + Math.sin(t * 1.4 + i) * 8 * settings.intensity,
+    y: 650 + hash(scene.id, i + 1200) * 500 + Math.cos(t * 1.2 + i) * 7 * settings.intensity,
+  }));
+  const molecules = origins.map((point, i) => `<g data-air-molecule="${i}" transform="translate(${n(point.x)} ${n(point.y)}) rotate(${n(Math.sin(t + i) * 18)})"><circle cx="-8" cy="0" r="10" fill="#B7E8F2" opacity=".72"/><circle cx="9" cy="0" r="10" fill="#79B9D5" opacity=".72"/><path d="M0 -2 V2" stroke="#E9FBFF" stroke-width="3"/></g>`).join('');
+  const incoming = Array.from({ length: 8 }, (_, i) => {
+    const progress = (t * .3 + i / 8) % 1;
+    const target = origins[(i * 3) % origins.length];
+    const startX = 165, startY = 440 + i * 34;
+    const x = mix(startX, target.x, progress), y = mix(startY, target.y, progress);
+    const angle = Math.atan2(target.y - startY, target.x - startX) * 180 / Math.PI;
+    return `<g data-light-photon="${i}" transform="translate(${n(x)} ${n(y)}) rotate(${n(angle)})"><path d="M-25 0 H25" stroke="${i % 2 ? '#FFF3BA' : '#FFFFFF'}" stroke-width="8" stroke-linecap="round"/><circle r="6" fill="#FFFFFF"/></g>`;
+  }).join('');
+  const scattered = Array.from({ length: Math.max(18, settings.particleCount) }, (_, i) => {
+    const origin = origins[i % origins.length];
+    const progress = (t * .38 + i / Math.max(18, settings.particleCount)) % 1;
+    const angle = hash(scene.id, i + 1400) * TAU;
+    const radius = 14 + progress * (170 + hash(scene.id, i + 1500) * 170) * settings.intensity;
+    const x = origin.x + Math.cos(angle) * radius, y = origin.y + Math.sin(angle) * radius;
+    return `<circle data-scattered-photon="${i}" cx="${n(x)}" cy="${n(y)}" r="${n(4 + i % 4)}" fill="${i % 3 ? '#66C8FF' : '#A5E8FF'}" opacity="${n(Math.sin(progress * Math.PI) * .9)}"/>`;
+  }).join('');
+  const transmitted = Array.from({ length: 6 }, (_, i) => {
+    const progress = (t * .24 + i / 6) % 1;
+    const x = mix(315, 1010, progress), y = 710 + i * 72 + Math.sin(progress * Math.PI) * 45;
+    return `<path data-transmitted-photon="${i}" d="M${n(x - 20)} ${n(y)} h40" stroke="${i % 2 ? '#FF9C68' : '#FFD179'}" stroke-width="7" stroke-linecap="round" opacity="${n(Math.sin(progress * Math.PI) * .75)}"/>`;
+  }).join('');
+  const reveal = smooth(t / Math.max(1, duration * .6));
+  return `<g data-animation-layer="light-scattering" data-scattering-progress="${n(reveal)}">
+    <defs><linearGradient id="atmosphere-blue" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#183B63" stop-opacity=".1"/><stop offset="1" stop-color="#227DC0" stop-opacity="${n(.25 + reveal * .3)}"/></linearGradient></defs>
+    <text x="540" y="405" text-anchor="middle" fill="#F2F8FC" font-family="Inter,Arial" font-size="39" font-weight="700">BEYAZ IŞIKTAN MAVİ GÖKYÜZÜNE</text>
+    <text x="540" y="452" text-anchor="middle" fill="#B5CBDC" font-family="Inter,Arial" font-size="24">Kısa dalga boyu, atmosferde daha güçlü saçılır</text>
+    <circle cx="150" cy="455" r="92" fill="#FFD66B"/><circle cx="150" cy="455" r="118" fill="none" stroke="${accent}" stroke-width="4" stroke-dasharray="12 15" stroke-dashoffset="${n(-t * 25)}" opacity=".55"/>
+    <path d="M0 1070 Q540 780 1080 1070 V1510 H0Z" fill="url(#atmosphere-blue)"/><path d="M0 1070 Q540 780 1080 1070" fill="none" stroke="#72CFFF" stroke-width="5" opacity=".6"/>
+    <path d="M245 470 L480 650 M245 520 L520 850 M260 560 L700 1030" stroke="#FFF4C7" stroke-width="4" opacity=".16"/>
+    ${molecules}${incoming}${transmitted}${scattered}
+    <g transform="translate(540 1325)"><path d="M-150 0 Q0 -120 150 0 Q0 120 -150 0Z" fill="#102A3E" stroke="#A4E5FF" stroke-width="6"/><circle r="61" fill="#4BAFE7"/><circle r="27" fill="#10202C"/><circle cx="18" cy="-18" r="10" fill="#E8FAFF"/></g>
+    <text x="105" y="665" fill="#FFF1B2" font-family="Inter,Arial" font-size="23" font-weight="700">GÜNEŞ IŞIĞI</text><text x="650" y="1240" fill="#9DE3FF" font-family="Inter,Arial" font-size="25" font-weight="700">MAVİ SAÇILIM</text>
+    ${label('FOTONLAR  +  MOLEKÜLLER  +  SAÇILIM')}</g>`;
 }
 function liquid(scene: Scene, t: number, duration: number, accent: string, settings: ResolvedAnimation): string {
   const count = Math.min(26, Math.max(8, Math.round(settings.particleCount * .65)));
@@ -272,6 +316,7 @@ export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity:
   const accent = identity.primaryColor || '#D8FF65';
   let artwork: string;
   switch (settings.preset) {
+    case 'light-scattering': artwork = lightScattering(scene, t, duration, accent, settings); break;
     case 'liquid-molecules': artwork = liquid(scene, t, duration, accent, settings); break;
     case 'crystallization': artwork = crystallization(scene, t, duration, accent, settings); break;
     case 'lattice-expansion': artwork = latticeExpansion(scene, t, duration, accent, settings); break;
