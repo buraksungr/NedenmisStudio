@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -71,6 +72,26 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("\\u0308", payload)
         self.assertEqual(json.loads(payload)["decoded_text"], "Buz i\u0308c\u0327in ğüşöç")
 
+    def test_numeric_parameters_are_clamped_and_reject_nan(self):
+        worker = self.load_worker()
+        module = worker.test_module
+        self.assertEqual(module.numeric({"exaggeration": 9}, "exaggeration", 0.5, 0.25, 2.0), 2.0)
+        self.assertEqual(module.numeric({}, "cfg_weight", 0.5, 0.0, 1.0), 0.5)
+        self.assertEqual(module.numeric({"temperature": -3}, "temperature", 0.8, 0.05, 1.5), 0.05)
+        for bad in (float("nan"), float("inf"), "abc"):
+            with self.assertRaises(ValueError):
+                module.numeric({"cfg_weight": bad}, "cfg_weight", 0.5, 0.0, 1.0)
+
+    def test_v3_lowercase_default_produces_dotted_i_for_turkish(self):
+        """Belgelenmiş kök neden: Python varsayılan lower() Türkçe I/İ eşlemesini bozar."""
+        model_default_lowercase = "Işık İĞDIR".lower()
+        self.assertNotEqual(model_default_lowercase, "ışık iğdır")
+        self.assertIn("\u0130".lower(), ("i\u0307", "i", "ı"))
+        # V3 yolu lowercase=False kullandığı için bu bozulma üretimde devre dışı.
+        worker = self.load_worker()
+        worker.model.tokenizer.text_to_tokens("Işık İĞDIR", language_id="tr")
+        self.assertFalse(worker.model.tokenizer.calls[-1]["lowercase"])
+
     def test_pinned_model_revision_matches_typescript(self):
         python_source = Path(__file__).with_name("bridge.py").read_text(encoding="utf-8")
         ts_source = Path(__file__).parents[1].joinpath("electron/main/services/tts/ChatterboxSource.ts").read_text(encoding="utf-8")
@@ -82,3 +103,25 @@ class BridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceIdentityTests(unittest.TestCase):
+    """Uygulamanın doğruladığı paket kimliği, indirilen sabit kaynakla aynı olmalı."""
+
+    def test_status_reports_source_identity_not_only_version_number(self):
+        source = Path(__file__).with_name("bridge.py").read_text(encoding="utf-8")
+        for needle in ("mtl_tts_sha256", "tokenizer_sha256", "package_file", "package_version"):
+            self.assertIn(needle, source, f"status olayı {needle} alanını bildirmeli")
+
+    def test_pinned_source_hashes_match_application_expectations(self):
+        """Sabitlenmiş V3 kaynağının Türkçe metin yolu beklenen özetlerle eşleşmeli."""
+        expected = {
+            "src/chatterbox/mtl_tts.py": "936759044e54cffe8c68b91b32e01da0bc032a1e084f769f0403080d86ad153c",
+            "src/chatterbox/models/tokenizers/tokenizer.py": "e169f02f14b008e8e7a4f29df66ecafaa29972ff4a38724b51545b8563861889",
+        }
+        root = Path(os.environ.get("NEDENMIS_CHATTERBOX_SOURCE", "")) if os.environ.get("NEDENMIS_CHATTERBOX_SOURCE") else None
+        if root is None or not root.is_dir():
+            self.skipTest("Sabitlenmiş Chatterbox kaynağı yerelde yok (NEDENMIS_CHATTERBOX_SOURCE ayarlanmadı).")
+        import hashlib
+        for name, digest in expected.items():
+            self.assertEqual(hashlib.sha256((root / name).read_bytes()).hexdigest(), digest, name)

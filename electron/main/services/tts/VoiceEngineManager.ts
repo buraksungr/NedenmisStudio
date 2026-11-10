@@ -8,7 +8,7 @@ import { x as extractTar } from 'tar';
 import type { VoiceEngineProgress, VoiceEngineStatus } from '../../../../shared/types.js';
 import type { Logger } from '../../infrastructure/Logger.js';
 import type { SettingsRepository } from '../../infrastructure/database/SettingsRepository.js';
-import { CHATTERBOX_DEPENDENCY_PROFILE, CHATTERBOX_MODEL_REVISION, CHATTERBOX_SOURCE_REVISION, CHATTERBOX_SOURCE_URL } from './ChatterboxSource.js';
+import { CHATTERBOX_DEPENDENCY_PROFILE, CHATTERBOX_EXPECTED_HASHES, CHATTERBOX_MODEL_REVISION, CHATTERBOX_SOURCE_REVISION, CHATTERBOX_SOURCE_URL } from './ChatterboxSource.js';
 
 const PYTHON_RELEASE = '20250317';
 const PYTHON_VERSION = '3.11.11';
@@ -17,7 +17,7 @@ const RUNTIME_FILES = {
   linux: 'cpython-3.11.11+20250317-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
 } as const;
 const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
-interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string }
+interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string; chatterboxVersion?: string; chatterboxSourceSha256?: string; chatterboxTokenizerSha256?: string }
 export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string; sampleRate: number; channels: number; modelRevision: string; textPreprocessing: string; normalizedText: string; decodedText: string; tokenCount: number; tokenIds: number[]; languageTokenId: number; unknownTokens: number; seed: number }
 interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number; seed?: number; legacyLowercase?: boolean }
 
@@ -54,7 +54,7 @@ export class VoiceEngineManager {
   }
   async status(): Promise<VoiceEngineStatus> {
     const state = this.state(); const snapshot = this.snapshot();
-    return { runtimeInstalled: existsSync(this.python()), dependenciesInstalled: Boolean(state.dependenciesInstalled && state.sourceRevision === CHATTERBOX_SOURCE_REVISION && state.dependencyProfile === CHATTERBOX_DEPENDENCY_PROFILE && existsSync(this.python())), modelDownloaded: Boolean(snapshot), referenceAvailable: Boolean(this.referencePath() && existsSync(this.referencePath()!)), verifiedAt: state.verifiedAt, lastGenerationSeconds: state.lastGenerationSeconds, pythonVersion: state.pythonVersion, torchVersion: state.torchVersion, setupRunning: Boolean(this.setupPromise), modelPath: snapshot, componentPath: this.root };
+    return { runtimeInstalled: existsSync(this.python()), dependenciesInstalled: Boolean(state.dependenciesInstalled && state.sourceRevision === CHATTERBOX_SOURCE_REVISION && state.dependencyProfile === CHATTERBOX_DEPENDENCY_PROFILE && existsSync(this.python())), modelDownloaded: Boolean(snapshot), referenceAvailable: Boolean(this.referencePath() && existsSync(this.referencePath()!)), verifiedAt: state.verifiedAt, lastGenerationSeconds: state.lastGenerationSeconds, pythonVersion: state.pythonVersion, torchVersion: state.torchVersion, chatterboxVersion: state.chatterboxVersion, chatterboxSourceSha256: state.chatterboxSourceSha256, chatterboxTokenizerSha256: state.chatterboxTokenizerSha256, setupRunning: Boolean(this.setupPromise), modelPath: snapshot, componentPath: this.root };
   }
   private progress(stage: VoiceEngineProgress['stage'], message: string, extra: Partial<VoiceEngineProgress> = {}): void { this.emit({ stage, message, ...extra }); }
   setup(): Promise<VoiceEngineStatus> {
@@ -99,11 +99,16 @@ export class VoiceEngineManager {
     const output = await this.run(this.python(), [this.bridge(), 'status'], 'dependencies');
     const statusLine = output.split('\n').filter((line) => line.includes('"event": "status"')).at(-1);
     if (!statusLine) throw new Error('Chatterbox bağımlılıkları doğrulanamadı.');
-    const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean; v3_supported: boolean; watermarker_ready: boolean };
+    const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean; v3_supported: boolean; watermarker_ready: boolean; mtl_tts_sha256?: string; tokenizer_sha256?: string; chatterbox?: string };
     if (details.cuda) throw new Error('CPU-only kurulum beklenirken CUDA etkin PyTorch bulundu. Yönetilen bileşeni yeniden kurun.');
     if (!details.v3_supported) throw new Error('Kurulan Chatterbox paketi Multilingual V3 desteklemiyor. V2’ye geri dönülmeyecek; resmî V3 kaynak kurulumunu yeniden deneyin.');
     if (!details.watermarker_ready) throw new Error('Perth watermark bileşeni CPU’da başlatılamadı. setuptools/PyYAML bağımlılıklarını içeren yönetilen kurulumu yeniden çalıştırın.');
-    this.saveState({ dependenciesInstalled: true, sourceRevision: CHATTERBOX_SOURCE_REVISION, dependencyProfile: CHATTERBOX_DEPENDENCY_PROFILE, pythonVersion: details.python, torchVersion: details.torch });
+    // Kurulan paketin gerçek kaynağı sabitlenen commit'le aynı mı? Yalnızca sürüm numarasına
+    // güvenmek V2/V3 karışmasını gizler; bu yüzden Türkçe metin yolunun dosya özetleri kaydedilir.
+    if (!details.mtl_tts_sha256 || !details.tokenizer_sha256) throw new Error('Kurulan Chatterbox paketinin kaynak kimliği okunamadı; V3 doğrulanamadı.');
+    if (CHATTERBOX_EXPECTED_HASHES.mtlTts && details.mtl_tts_sha256 !== CHATTERBOX_EXPECTED_HASHES.mtlTts) throw new Error(`Kurulan Chatterbox kaynağı sabitlenen V3 commit ile eşleşmiyor (mtl_tts.py ${details.mtl_tts_sha256}).`);
+    if (CHATTERBOX_EXPECTED_HASHES.tokenizer && details.tokenizer_sha256 !== CHATTERBOX_EXPECTED_HASHES.tokenizer) throw new Error(`Kurulan Chatterbox tokenizer'ı sabitlenen V3 commit ile eşleşmiyor (${details.tokenizer_sha256}).`);
+    this.saveState({ dependenciesInstalled: true, sourceRevision: CHATTERBOX_SOURCE_REVISION, dependencyProfile: CHATTERBOX_DEPENDENCY_PROFILE, pythonVersion: details.python, torchVersion: details.torch, chatterboxVersion: details.chatterbox, chatterboxSourceSha256: details.mtl_tts_sha256, chatterboxTokenizerSha256: details.tokenizer_sha256 });
   }
   private async downloadModel(): Promise<void> {
     this.progress('model', 'Chatterbox Multilingual V3 modeli Hugging Face üzerinden indiriliyor…', { progress: 0 });

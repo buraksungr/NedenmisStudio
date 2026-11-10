@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppApi } from '../../shared/types';
 import { DEFAULT_IDENTITY, defaultSettings } from '../../shared/defaults';
@@ -61,17 +61,26 @@ describe('React uygulaması smoke testi', () => {
   it('üç gökyüzü sahnesinin küçük resimlerini, sesini, zamanını ve hareketli önizlemesini eşitler', async () => {
     const api = mockApi(); const project = createSkyAnimationProject();
     api.projects.list = vi.fn().mockResolvedValue([project]); api.projects.get = vi.fn().mockResolvedValue(project); api.projects.update = vi.fn().mockImplementation(async (next) => next); window.nedenmis = api;
-    const callbacks = new Map<number, FrameRequestCallback>(); let nextId = 1;
+    // Editörün tek saati requestAnimationFrame + performance.now() ile çalışır.
+    let now = 0; const callbacks = new Map<number, FrameRequestCallback>(); let nextId = 1;
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => { const handle = nextId++; callbacks.set(handle, callback); return handle; }));
-    vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => callbacks.delete(handle)));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => { callbacks.delete(handle); }));
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(); const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     render(<App />); fireEvent.click(await screen.findByRole('button', { name: /Gökyüzü neden mavi görünür/ }));
     await screen.findByTestId('animated-scene');
     await waitFor(() => expect(document.querySelectorAll('img[src^="/proof/sky-scene-"]')).toHaveLength(6));
     fireEvent.click(screen.getByRole('button', { name: 'Oynat' }));
     await waitFor(() => expect(play).toHaveBeenCalled());
-    const audio = document.querySelector('audio')!; audio.currentTime = .8; fireEvent.timeUpdate(audio);
+    // İlk kare saati çapalar; sonraki kareler mutlak oynatma zamanını taşır.
+    const advance = async (ms: number) => { now += ms; await act(async () => { const batch = [...callbacks.values()]; callbacks.clear(); batch.forEach((callback) => callback(now)); }); };
+    await advance(0);
+    expect(callbacks.size).toBeGreaterThan(0);
+    await advance(800);
+    // Ses süresi videoyu belirlemez: oynatma başlığı mutlak zamandır.
     await waitFor(() => expect(screen.getByTestId('animated-scene').getAttribute('data-frame-time')).toBe('0.800'));
+    const activeNarration = document.querySelector('audio[data-active="true"]') as HTMLAudioElement;
+    expect(activeNarration).toBeTruthy();
+    expect(activeNarration.currentTime).toBeGreaterThan(.2);
     fireEvent.click(screen.getByRole('button', { name: 'Duraklat' })); await waitFor(() => expect(pause).toHaveBeenCalled());
     for (let index = 0; index < project.scenes.length; index += 1) {
       fireEvent.click(screen.getByRole('button', { name: new RegExp(SKY_SCENE_NARRATIONS[index].slice(0, 24)) }));
@@ -79,7 +88,10 @@ describe('React uygulaması smoke testi', () => {
       await waitFor(() => expect(preview.getAttribute('aria-label')).toContain(`Sahne ${index + 1}`));
       expect(preview.getAttribute('data-animation-preset')).toBe('light-scattering');
       expect(preview.innerHTML).toContain('data-light-photon=');
-      expect(document.querySelector('audio')?.getAttribute('src')).toBe(project.scenes[index].narrationPath);
+      // Tüm anlatımlar önceden yüklenir; etkin olan tek eleman işaretlenir.
+      const active = document.querySelector('audio[data-active="true"]');
+      expect(active?.getAttribute('src')).toBe(project.scenes[index].narrationPath);
+      expect(document.querySelectorAll('audio[data-active="true"]')).toHaveLength(1);
     }
     vi.unstubAllGlobals();
   });

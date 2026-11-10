@@ -316,6 +316,10 @@ export interface VoiceEngineStatus {
   lastGenerationSeconds?: number;
   pythonVersion?: string;
   torchVersion?: string;
+  /** Kurulu paketin gerçek kimliği: sürüm numarası tek başına V2/V3 ayrımını kanıtlamaz. */
+  chatterboxVersion?: string;
+  chatterboxSourceSha256?: string;
+  chatterboxTokenizerSha256?: string;
   setupRunning: boolean;
   modelPath?: string;
   componentPath: string;

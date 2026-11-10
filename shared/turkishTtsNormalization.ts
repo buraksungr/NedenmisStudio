@@ -4,6 +4,34 @@ const SCALES = ['', 'bin', 'milyon', 'milyar', 'trilyon', 'katrilyon', 'kentilyo
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 const NUMBER = String.raw`[+-]?\d+(?:\.\d+)*(?:,\d+)?`;
 
+// Sözcük → sıra sayısı eşlemesi. Ünsüz yumuşaması ("dört"→"dördüncü") ve ünlü
+// uyumu burada açıkça yazılır; sonlu bir kural motoru tahmin yürütmez.
+const ORDINAL_WORDS: Record<string, string> = {
+  bir: 'birinci', iki: 'ikinci', üç: 'üçüncü', dört: 'dördüncü', beş: 'beşinci', altı: 'altıncı',
+  yedi: 'yedinci', sekiz: 'sekizinci', dokuz: 'dokuzuncu', on: 'onuncu', yirmi: 'yirminci',
+  otuz: 'otuzuncu', kırk: 'kırkıncı', elli: 'ellinci', altmış: 'altmışıncı', yetmiş: 'yetmişinci',
+  seksen: 'sekseninci', doksan: 'doksanıncı', yüz: 'yüzüncü', bin: 'bininci',
+  milyon: 'milyonuncu', milyar: 'milyarıncı', trilyon: 'trilyonuncu',
+};
+
+/**
+ * Türkçe sıra sayısı: 1→birinci, 2→ikinci, 3→üçüncü, 4→dördüncü, 6→altıncı,
+ * 20→yirminci, 21→yirmi birinci, 100→yüzüncü, 1000→bininci.
+ */
+export function ordinalToTurkishWords(value: number): string | undefined {
+  if (!Number.isInteger(value) || value < 1 || value > 1_000_000_000_000) return undefined;
+  const words = integerToTurkishWords(value).split(' ');
+  const last = words.pop()!;
+  const ordinal = ORDINAL_WORDS[last];
+  if (!ordinal) return undefined;
+  return [...words, ordinal].join(' ');
+}
+
+function matchCase(replacement: string, original: string): string {
+  if (!original || original[0] !== original[0].toLocaleUpperCase('tr') || original[0] === original[0].toLocaleLowerCase('tr')) return replacement;
+  return replacement[0].toLocaleUpperCase('tr') + replacement.slice(1);
+}
+
 function belowThousand(value: number): string {
   const hundreds = Math.floor(value / 100);
   const rest = value % 100;
@@ -69,6 +97,8 @@ const UNITS: Record<string, string> = {
   hz: 'hertz', sn: 'saniye', dk: 'dakika', sa: 'saat', pa: 'paskal', '°c': 'derece', '°f': 'derece Fahrenhayt',
   m: 'metre', g: 'gram', l: 'litre', s: 'saniye', w: 'vat', v: 'volt', a: 'amper',
 };
+// "5G" bir ölçü birimi değil, nesil adıdır; "gram"a çevrilmemeli.
+const UNIT_AMBIGUOUS = /^(g|m|s|a|v|w|l|pa)$/i;
 const unitPattern = Object.keys(UNITS).sort((a, b) => b.length - a.length).map((unit) => unit.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
 
 /**
@@ -77,7 +107,16 @@ const unitPattern = Object.keys(UNITS).sort((a, b) => b.length - a.length).map((
  */
 export function normalizeTurkishForTts(source: string): string {
   let text = source.normalize('NFC');
-  text = text.replace(/\bDr\./gi, 'doktor').replace(/\bProf\./gi, 'profesör').replace(/\börn\./gi, 'örneğin').replace(/\bvb\./gi, 've benzeri').replace(/\bvs\./gi, 'vesaire');
+  // Harf dizisiyle bitişik sayılar ("5G", "4K", "3D", "1080p") bir ad ya da kod
+  // olarak okunur; yalnızca ortak birim kısaltması değilse sonradan geri konur.
+  const masked: string[] = [];
+  text = text.replace(/\b\d+[A-ZÇĞİÖŞÜa-zçğıöşü]{1,3}\b/g, (token) => {
+    if (UNITS[token.replace(/^\d+/, '').toLowerCase()] && !UNIT_AMBIGUOUS.test(token.replace(/^\d+/, ''))) return token;
+    masked.push(token);
+    return String.fromCodePoint(0xe000 + masked.length - 1);
+  });
+  text = text.replace(/\bDr\./gi, (match) => matchCase('doktor', match)).replace(/\bProf\./gi, (match) => matchCase('profesör', match))
+    .replace(/\börn\./gi, (match) => matchCase('örneğin', match)).replace(/\bvb\./gi, (match) => matchCase('ve benzeri', match)).replace(/\bvs\./gi, (match) => matchCase('vesaire', match));
 
   text = text.replace(/\b(\d{4})-([01]?\d)-([0-3]?\d)\b/g, (_match, year, month, day) => {
     const d = Number(day), m = Number(month);
@@ -92,18 +131,33 @@ export function normalizeTurkishForTts(source: string): string {
     return `${prefix ? 'saat ' : 'saat '}${integerToTurkishWords(Number(hour))}${minutes}`;
   });
 
+  // Sıra sayıları: "1. Dünya Savaşı" → "birinci Dünya Savaşı". Cümle sonu noktası
+  // ayrı tutulur; sayıdan hemen sonra gelen nokta ve boşluk sıra eki sayılır.
+  // Yalnızca 1-3 basamaklı sayılar sıra sayısı olarak okunur; dört basamaklı yıllar
+  // ("Yıl 2026.") cümle sonu noktası olarak kalır ve yanlışlıkla "yirmi altıncı" olmaz.
+  text = text.replace(/(?<!\d)(\d{1,3})\.(?=\s+[A-ZÇĞİÖŞÜa-zçğıöşü])/g, (_match, digits) => ordinalToTurkishWords(Number(digits)) ?? `${digits}.`);
+
   text = text.replace(new RegExp(`%\\s*(${NUMBER})`, 'g'), (_match, value) => `yüzde ${decimalToWords(value)}`);
   text = text.replace(new RegExp(`(${NUMBER})\\s*%`, 'g'), (_match, value) => `yüzde ${decimalToWords(value)}`);
 
   text = text.replace(new RegExp(`(₺|\\$|€|£)\\s*(${NUMBER})`, 'g'), (_match, currency, value) => `${decimalToWords(value)} ${CURRENCIES[currency.toLowerCase()]}`);
   const currencyNames = Object.keys(CURRENCIES).filter((key) => key.length > 1).sort((a, b) => b.length - a.length).join('|');
   text = text.replace(new RegExp(`(${NUMBER})\\s*(${currencyNames}|₺)`, 'gi'), (_match, value, currency) => `${decimalToWords(value)} ${CURRENCIES[currency.toLowerCase()]}`);
-  text = text.replace(new RegExp(`(${NUMBER})\\s*(${unitPattern})\\b`, 'gi'), (_match, value, unit) => `${decimalToWords(value)} ${UNITS[unit.toLowerCase()]}`);
+  // Birimden sonra gelen üst simgeler okunmaz ("km²" → "kilometre kare").
+  text = text.replace(/(km|cm|mm|m)²/gi, (_match, unit: string) => `${UNITS[unit.toLowerCase()]} kare`)
+    .replace(/(km|cm|mm|m)³/gi, (_match, unit: string) => `${UNITS[unit.toLowerCase()]} küp`);
+  text = text.replace(new RegExp(`(${NUMBER})\\s*(${unitPattern})\\b`, 'gi'), (_match, value, unit) => {
+    // Belirsiz tek harfli birimler yalnızca açık ölçü bağlamında okunur: "5G" adı korunur,
+    // "5 g" ve "5 g'lık" ise "beş gram" olur.
+    if (UNIT_AMBIGUOUS.test(unit) && !/^\s/.test(_match.slice(String(value).length))) return _match;
+    return `${decimalToWords(value)} ${UNITS[unit.toLowerCase()]}`;
+  });
 
   text = text.replace(new RegExp(`(${NUMBER})[eE]([+-]?\\d+)`, 'g'), (_match, value, exponent) => `${decimalToWords(value)} çarpı on üssü ${integerToTurkishWords(exponent)}`);
   text = text.replace(/±/g, ' artı eksi ').replace(/[×*]/g, ' çarpı ').replace(/(?<=\d)\s*[xX]\s*(?=\d)/g, ' çarpı ')
     .replace(/≤/g, ' küçük eşittir ').replace(/≥/g, ' büyük eşittir ').replace(/≠/g, ' eşit değildir ').replace(/≈/g, ' yaklaşık ').replace(/∞/g, ' sonsuz ')
     .replace(/\//g, ' bölü ').replace(/\+/g, ' artı ').replace(/(?<=\d)\s+-\s+(?=\d)/g, ' eksi ').replace(/\^/g, ' üssü ').replace(/=/g, ' eşittir ').replace(/>/g, ' büyüktür ').replace(/</g, ' küçüktür ');
   text = text.replace(new RegExp(NUMBER, 'g'), (value) => decimalToWords(value));
+  text = text.replace(/[\ue000-\uf8ff]/g, (match) => masked[match.codePointAt(0)! - 0xe000]);
   return text.replace(/\s+/g, ' ').replace(/\s+([,.!?;:])/g, '$1').trim();
 }

@@ -63,6 +63,16 @@ jobs:
           set CODE=%ERRORLEVEL%
           type release\production-electron-smoke.log
           exit /b %CODE%
+      - name: Chatterbox V3 kaynak ve model kimliğini doğrula
+        shell: cmd
+        run: |
+          if not exist release mkdir release
+          python scripts/verify-chatterbox-source.py --output release/chatterbox-source.json
+          if errorlevel 1 (
+            echo ::error::Chatterbox V3 kaynak/model kimliği doğrulanamadı; Build yayınlanmayacak.
+            exit /b 1
+          )
+          python -c "import json;d=json.load(open('release/chatterbox-source.json',encoding='utf-8'));print(json.dumps({k:d[k] for k in ('status','sourceArchiveSha256','sourceVerified','modelVerified')},ensure_ascii=False))"
       - name: Gerçek sentetik konuşmacı referansı
         shell: pwsh
         run: |
@@ -241,6 +251,7 @@ jobs:
             release/turkish-quality-result.json
             release/turkish-quality-source-result.json
             release/build-manifest.json
+            release/chatterbox-source.json
           if-no-files-found: error
       - name: GitHub Release
         shell: pwsh
@@ -250,7 +261,7 @@ jobs:
           $tag = "windows-v1.1.0-build$($env:GITHUB_RUN_NUMBER)"
           $assets = @(
             'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
-            'release/chatterbox-test-result.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
+            'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
             'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass'
           )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }

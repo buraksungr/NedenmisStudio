@@ -15,8 +15,11 @@ export class ChatterboxProvider implements TtsProvider {
     if (request.selection.providerId !== this.id) throw new Error('Chatterbox sağlayıcı seçimi doğrulanamadı; başka bir motora geçilmedi.');
     const rawPath = `${outputPath}.v3-model.wav`;
     try {
-      const generated = await this.manager.synthesize({ id: id('chatterbox'), text: request.text, referencePath: reference, outputPath: rawPath, exaggeration: request.selection.exaggeration ?? .5, cfgWeight: request.selection.cfgWeight ?? .5, temperature: request.selection.temperature ?? .8 });
-      const filters = Math.abs(request.selection.speed - 1) > .001 ? `atempo=${request.selection.speed.toFixed(3)}` : 'anull';
+      // Ayar kaydı eksik/bozuksa model argümanı NaN olmamalı: her değer doğrulanır.
+      const bounded = (value: number | undefined, fallback: number, low: number, high: number) => Number.isFinite(value) ? Math.min(high, Math.max(low, value as number)) : fallback;
+      const generated = await this.manager.synthesize({ id: id('chatterbox'), text: request.text, referencePath: reference, outputPath: rawPath, exaggeration: bounded(request.selection.exaggeration, .5, .25, 2), cfgWeight: bounded(request.selection.cfgWeight, .5, 0, 1), temperature: bounded(request.selection.temperature, .8, .05, 1.5) });
+      const speed = bounded(request.selection.speed, 1, .5, 2);
+      const filters = Math.abs(speed - 1) > .001 ? `atempo=${speed.toFixed(3)}` : 'anull';
       await this.ffmpeg.run(id('chatterbox-ffmpeg'), ['-i', rawPath, '-af', filters, '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', outputPath]);
       const info = await stat(outputPath); if (info.size < 1000) throw new Error('Chatterbox çıktı sesi boş.');
       const probe = await this.ffmpeg.probe(outputPath);
