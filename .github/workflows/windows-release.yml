@@ -98,6 +98,18 @@ jobs:
           set CODE=%ERRORLEVEL%
           type release\chatterbox-e2e.log
           exit /b %CODE%
+      - name: Gerçek Türkçe V3 üretimi + bağımsız ASR (yedi vaka)
+        if: success()
+        env:
+          NEDENMIS_TURKISH_TTS_E2E: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_CHATTERBOX_TURKISH_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\turkish-reference.flac
+        shell: cmd
+        run: |
+          npm run test:turkish-tts > release/turkish-tts-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\turkish-tts-e2e.log
+          exit /b %CODE%
       - name: Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E
         if: success()
         env:
@@ -233,6 +245,7 @@ jobs:
             release/*.json
             release/*.log
             release/*.mp4
+            release/*.wav
             release/previews/**
             release/exports/**
             release/Kurulu-Uygulama-Testi/**

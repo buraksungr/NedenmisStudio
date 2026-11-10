@@ -151,7 +151,10 @@ describe('Uzun kurgu — tek saatle baştan sona oynatma', () => {
     for (const target of targets) {
       seek(target);
       const expectedScene = sceneIndexAt(timeline, target) + 1;
-      await waitFor(() => expect(screen.getByTestId('preview-stage').getAttribute('data-current-scene')).toBe(String(expectedScene)));
+      // Önce oynatma başlığının hedefe oturduğunu bekle: sahne zaten aynıysa
+      // yalnızca sahne kimliğini beklemek React güncellemesini beklemeden geçerdi.
+      await waitFor(() => expect(parseHead(screen.getByTestId('playhead-time').textContent)).toBeCloseTo(target, 2));
+      expect(screen.getByTestId('preview-stage').getAttribute('data-current-scene')).toBe(String(expectedScene));
       const frameTime = Number(screen.getByTestId('animated-scene').getAttribute('data-frame-time'));
       expect(frameTime).toBeCloseTo(Math.floor((target - timeline.starts[expectedScene - 1]) * 30) / 30, 2);
     }
