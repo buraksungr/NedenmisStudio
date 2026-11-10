@@ -162,7 +162,14 @@ export function usePlayback({ project, muted }: Options): PlaybackState {
     const target = Math.max(0, Math.min(desired, Math.max(0, limit)));
     if (playingNow.current) {
       if (Math.abs(element.currentTime - target) > .25) element.currentTime = target;
-      if (element.paused) void element.play().catch(() => { /* Otomatik oynatma engeli: saat yine de ilerler. */ });
+      if (element.paused) {
+        // play() bazı ortamlarda değer döndürmez (eski WebView, test ortamı); olsa da
+        // otomatik oynatma engeli saati durdurmaz — tek yetkili saat rAF'tir.
+        try {
+          const started = element.play() as Promise<void> | undefined;
+          if (started?.catch) started.catch(() => undefined);
+        } catch { /* Sessizce yutulur: saat ilerlemeye devam eder. */ }
+      }
     } else element.pause();
   };
 
