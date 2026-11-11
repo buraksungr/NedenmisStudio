@@ -11,7 +11,7 @@ export class ChatterboxProvider implements TtsProvider {
   constructor(private readonly manager: VoiceEngineManager, private readonly ffmpeg: FFmpegService, private readonly storagePath: () => string, private readonly referencePath: () => string | undefined) {}
   async voices(): Promise<VoiceInfo[]> { return [{ id: 'reference-tr', name: 'Kayıtlı referans konuşmacı', language: 'tr-TR', gender: 'unknown', description: 'Yüklediğiniz izinli kayıttan çıkarılan konuşmacı koşullarıyla gerçek zero-shot Türkçe ses klonlama.', styles: ['belgesel', 'samimi', 'sakin', 'enerjik'] }]; }
   async synthesize(request: TtsRequest, outputPath: string): Promise<Omit<TtsResult, 'path' | 'providerId'>> {
-    const reference = this.referencePath(); if (!reference) throw new Error('Chatterbox için referans ses gerekli. WAV, MP3 veya M4A kaydınızı yükleyin.');
+    const reference = this.referencePath(); if (!reference) throw new Error('Chatterbox için referans ses gerekli. WAV, MP3, M4A veya FLAC kaydınızı yükleyin.');
     if (request.selection.providerId !== this.id) throw new Error('Chatterbox sağlayıcı seçimi doğrulanamadı; başka bir motora geçilmedi.');
     const rawPath = `${outputPath}.v3-model.wav`;
     try {

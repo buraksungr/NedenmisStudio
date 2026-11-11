@@ -11,11 +11,18 @@ import { MediaService } from '../../electron/main/services/media/MediaService.js
 
 const directory = await mkdtemp(join(tmpdir(), 'nedenmis-reference-')); afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 describe('Gerçek referans ses dönüşümü', () => {
-  it('WAV, MP3 ve M4A girdilerini mono 24 kHz PCM WAV profiline dönüştürür', async () => {
+  it('WAV, MP3, M4A ve FLAC girdilerini mono 24 kHz PCM WAV profiline dönüştürür', async () => {
     const ffmpeg = new FFmpegService(() => undefined); const db = new AppDatabase(':memory:'); const service = new MediaService(new MediaRepository(db), new ProjectRepository(db), ffmpeg, () => directory);
     const wav = join(directory, 'source.wav'); await ffmpeg.run('reference-source', ['-f', 'lavfi', '-i', 'sine=frequency=330:duration=4', '-c:a', 'pcm_s16le', wav]);
     const mp3 = join(directory, 'source.mp3'); const m4a = join(directory, 'source.m4a'); await ffmpeg.run('reference-mp3', ['-i', wav, '-c:a', 'libmp3lame', mp3]); await ffmpeg.run('reference-m4a', ['-i', wav, '-c:a', 'aac', m4a]);
     for (const source of [wav, mp3, m4a]) { const item = await service.importReference(source); const probe = await ffmpeg.probe(item.path); expect(probe.duration).toBeGreaterThanOrEqual(3.8); expect(probe.sampleRate).toBe(24000); expect(probe.channels).toBe(1); expect(probe.codec).toBe('pcm_s16le'); }
+    // FLAC: resmî Türkçe V3 referansı bu formatta gelir; kabul edilmezse
+    // gerçek model testi "WAV, MP3 veya M4A olmalıdır" hatasıyla düşüyordu.
+    const flac = join(directory, 'source.flac');
+    await ffmpeg.run('reference-flac', ['-i', wav, '-c:a', 'flac', flac]);
+    const fromFlac = await service.importReference(flac);
+    const flacProbe = await ffmpeg.probe(fromFlac.path);
+    expect(flacProbe.sampleRate).toBe(24000); expect(flacProbe.channels).toBe(1); expect(flacProbe.codec).toBe('pcm_s16le');
     const validPath = join(directory, 'assets', 'reference_voice.wav'); const before = createHash('sha256').update(await readFile(validPath)).digest('hex'); const short = join(directory, 'short.wav'); await ffmpeg.run('reference-short', ['-f', 'lavfi', '-i', 'sine=duration=1', '-c:a', 'pcm_s16le', short]);
     await expect(service.importReference(short)).rejects.toThrow('en az 3 saniye'); const after = createHash('sha256').update(await readFile(validPath)).digest('hex'); expect(after).toBe(before); db.close();
   }, 120000);

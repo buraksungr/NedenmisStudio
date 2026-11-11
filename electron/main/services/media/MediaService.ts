@@ -26,7 +26,9 @@ export class MediaService {
     return imported;
   }
   async importReference(source: string): Promise<MediaItem> {
-    if (!['.wav', '.mp3', '.m4a'].includes(extname(source).toLowerCase())) throw new Error('Referans ses WAV, MP3 veya M4A olmalıdır.');
+    // FLAC de kabul edilir: referans ses her durumda 24 kHz mono PCM WAV'a çevrilir,
+    // kayıpsız kaynak (ör. resmî Türkçe V3 referansı) yeniden kodlanmadan korunur.
+    if (!['.wav', '.mp3', '.m4a', '.flac'].includes(extname(source).toLowerCase())) throw new Error('Referans ses WAV, MP3, M4A veya FLAC olmalıdır.');
     if (!existsSync(source)) throw new Error('Seçilen referans ses dosyası bulunamadı.');
     const directory = join(this.storagePath(), 'assets'); await mkdir(directory, { recursive: true }); const target = join(directory, 'reference_voice.wav'); const temporary = join(directory, `reference_voice-${Date.now()}.wav`);
     try {
