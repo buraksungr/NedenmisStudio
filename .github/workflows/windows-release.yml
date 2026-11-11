@@ -40,12 +40,23 @@ jobs:
           NEDENMIS_ANIMATION_RESULT: ${{ github.workspace }}\release\animation-test-result.json
           NEDENMIS_ANIMATION_DIAGNOSTICS: ${{ github.workspace }}\release\animation-pipeline-diagnostics.json
           NEDENMIS_ANIMATION_OUTPUT: ${{ github.workspace }}\release\Why-does-ice-float-on-water.mp4
+        shell: pwsh
         run: |
-          npm run typecheck
-          npm run lint
-          python -m unittest discover -s voice-engine -p "test_*.py"
-          python -m unittest scripts/test_drive_upload_release.py
-          npm run test
+          # Çıktı dosyaya da yazılır: hata durumunda annotation'a düşen log bu olur.
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $log = 'release/static-checks.log'
+          function Invoke-Step($name, $command) {
+            "[$name] başladı" | Tee-Object -FilePath $log -Append
+            $global:LASTEXITCODE = 0
+            Invoke-Expression "$command 2>&1" | Tee-Object -FilePath $log -Append
+            if ($LASTEXITCODE -ne 0) { "[$name] BAŞARISIZ (çıkış $LASTEXITCODE)" | Tee-Object -FilePath $log -Append; exit $LASTEXITCODE }
+            "[$name] geçti" | Tee-Object -FilePath $log -Append
+          }
+          Invoke-Step 'typecheck' 'npm run typecheck'
+          Invoke-Step 'lint' 'npm run lint'
+          Invoke-Step 'python' 'python -m unittest discover -s voice-engine -p "test_*.py"'
+          Invoke-Step 'drive-upload-test' 'python -m unittest scripts/test_drive_upload_release.py'
+          Invoke-Step 'vitest' 'npm run test'
       - name: Üretim derlemesi
         run: npm run build
       - name: Geliştirme Electron açılışı
@@ -237,8 +248,30 @@ jobs:
           }
           if ($sections.Count) {
             [IO.File]::WriteAllText("$PWD/release/failure-summary.md", "CI $($env:GITHUB_RUN_ID) teknik hata özeti`n`n$($sections -join "`n`n")")
-            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/failure-summary.md }
+            # workflow_dispatch olayında PR numarası boş gelir; dal adından çözülür.
+            $number = $env:PR_NUMBER
+            if (-not $number) {
+              $number = gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' 2>$null
+            }
+            if ($number) { gh pr comment $number --body-file release/failure-summary.md }
+            else { Write-Host 'PR bulunamadı; özet yalnızca artefaktta.' }
           }
+      - name: Kare düzeyinde geçiş sınırı denetimi
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $mp4 = Get-ChildItem "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports\*.mp4" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $mp4) { Write-Error 'Geçiş sınırı denetimi için dışa aktarılmış MP4 bulunamadı.'; exit 1 }
+          # Sınırlar testin ürettiği gerçek sahne başlangıçlarından gelir (tahmin yok).
+          $result = Get-Content release/chatterbox-test-result.json -Raw | ConvertFrom-Json
+          # Son sahnenin geçişi yok (ondan sonra klip yok); sınırlar ondan önce biter.
+          $boundaries = $result.sceneBoundaries | Select-Object -SkipLast 1 | ConvertTo-Json -Compress -AsArray
+          if (-not $boundaries -or $boundaries -eq 'null') { Write-Error 'Sahne sınırları okunamadı.'; exit 1 }
+          node scripts/inspect-boundaries.mjs $mp4.FullName release/boundary-frames.json $boundaries
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $report = Get-Content release/boundary-frames.json -Raw | ConvertFrom-Json
+          if (-not $report.ok) { Write-Error "Kare sınırı denetimi başarısız: $($report.failures -join '; ')"; exit 1 }
       - name: Test ve ses/video kanıtlarını paketle
         if: always()
         shell: pwsh

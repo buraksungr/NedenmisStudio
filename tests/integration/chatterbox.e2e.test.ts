@@ -123,6 +123,8 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe kalite ve dört sahne 
         textPreprocessing: preview.engine!.textPreprocessing, device: preview.engine!.device, referenceSha256: preview.engine!.referenceSha256,
         previewSeconds: preview.duration, previewGenerationSeconds: preview.engine!.generationSeconds,
         projectName: persisted.name, projectNarrationSeconds: narrated.scenes.map((scene) => scene.narrationDuration),
+        // Kare düzeyinde geçiş denetimi için gerçek sahne sınırları ve geçiş türleri.
+        sceneBoundaries: persisted.scenes.map((scene, index) => ({ index: index + 1, at: starts[index], transition: scene.transition })),
         abDiagnostics, mp4: exported.outputPath, video, audioVideoStreams: JSON.parse(streams.stdout), persistenceAfterRestart: true,
         hardware: { cpu: cpus()[0]?.model, logicalCores: cpus().length, totalMemoryGB: Math.round(totalmem() / 1024 ** 3 * 10) / 10, freeMemoryAtEndGB: Math.round(freemem() / 1024 ** 3 * 10) / 10 },
         note: 'Gerçek model ve video üretimi doğrulandı. Anlaşılırlık ayrı ASR adımında ölçülür; insan dinlemesi ve konuşmacı benzerliği iddia edilmez.',
