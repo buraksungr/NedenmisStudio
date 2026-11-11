@@ -127,9 +127,6 @@ jobs:
           $code = $LASTEXITCODE
           Get-Content release/turkish-tts-e2e.log -Tail 200
           exit $code
-          set CODE=%ERRORLEVEL%
-          type release\turkish-tts-e2e.log
-          exit /b %CODE%
       - name: Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E
         if: success()
         env:

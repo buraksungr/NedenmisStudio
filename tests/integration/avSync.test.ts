@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
+import { FFmpegService } from '../../electron/main/infrastructure/FFmpegService.js';
 import { buildPlaybackTimeline as buildTimeline } from '../../shared/playback.js';
 
 /**
@@ -18,8 +19,11 @@ import { buildPlaybackTimeline as buildTimeline } from '../../shared/playback.js
  * `NEDENMIS_PARITY_EVIDENCE` (aynı testin kanıt klasörü, subtitles.ass içerir).
  */
 const execFileAsync = promisify(execFile);
-const ffmpegPath = process.env.NEDENMIS_FFMPEG_PATH || 'node_modules/@ffmpeg-installer/linux-x64/ffmpeg';
-const ffprobePath = process.env.NEDENMIS_FFPROBE_PATH || 'node_modules/ffprobe-static/bin/linux/x64/ffprobe';
+// Platforma bağımlı sabit yol YOK: Windows CI'da linux-x64 yolu ENOENT veriyordu.
+// Yollar uygulamanın kendi çözümleyicisinden alınır (ffmpeg-static/ffprobe-static).
+const ffmpegService = new FFmpegService(() => process.env.NEDENMIS_FFMPEG_PATH);
+const ffmpegPath = ffmpegService.ffmpegPath;
+const ffprobePath = process.env.NEDENMIS_FFPROBE_PATH || ffmpegService.ffprobePath;
 const mp4 = process.env.NEDENMIS_PARITY_MP4 || '.verification/build20-parity/buz-52s.mp4';
 const evidence = process.env.NEDENMIS_PARITY_EVIDENCE || '.verification/build20-parity/evidence';
 const enabled = existsSync(mp4) && existsSync(join(evidence, 'subtitles.ass'));
