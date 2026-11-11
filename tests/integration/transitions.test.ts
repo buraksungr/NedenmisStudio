@@ -27,8 +27,16 @@ afterAll(async () => { await rm(directory, { recursive: true, force: true }); })
  * Geçiş doğrulaması: statik renkli sahneler (hızlı) ile dört farklı geçiş.
  * Siyah kare, eksik kare ve kısa süre hataları burada yakalanır.
  */
-describe('Geçişler — siyah kare yok, kare kaybı yok', () => {
-  it('fade/dissolve/slide/sert kesme geçişlerini tam kare sayısıyla ve kararmadan üretir', async () => {
+/**
+ * Windows'ta `xfade` filtresi vardır ve dışa aktarım bu yolu kullanır; yerel Linux
+ * FFmpeg'i eski olduğu için `blend` tabanlı yol kullanılır. Aynı senaryo iki kez
+ * koşar: ortamda modern FFmpeg varsa (`NEDENMIS_XFADE_FFMPEG`) Windows yolu da
+ * yerelde doğrulanır. Regresyon: xfade zincirinde sert kesme `duration=0.01` ile
+ * yapılınca dışa aktarım 495/630 karede kalıyordu; kesme artık `concat` ile.
+ */
+const XFADE_FFMPEG = process.env.NEDENMIS_XFADE_FFMPEG;
+
+async function exportTransitionProject(customFfmpeg?: string): Promise<void> {
     const colours = ['#e07830', '#30a060', '#3040e0', '#e0c030'];
     const paths: string[] = [];
     for (let index = 0; index < colours.length; index += 1) {
@@ -37,7 +45,7 @@ describe('Geçişler — siyah kare yok, kare kaybı yok', () => {
       paths.push(path);
     }
     const db = new AppDatabase(':memory:'); const projects = new ProjectRepository(db); const exportRecords = new ExportRepository(db);
-    const ffmpeg = new FFmpegService(() => undefined);
+    const ffmpeg = new FFmpegService(() => customFfmpeg);
     const project = projects.create(projectInput({ targetDuration: 21 }));
     const durations = [5, 6, 5.5, 4.5];
     project.scenes = durations.map((duration, index): Scene => ({
@@ -90,5 +98,13 @@ describe('Geçişler — siyah kare yok, kare kaybı yok', () => {
       expect(window.length).toBeGreaterThan(2);
     }
     db.close();
+}
+
+describe('Geçişler — siyah kare yok, kare kaybı yok', () => {
+  it('fade/dissolve/slide/sert kesme geçişlerini tam kare sayısıyla ve kararmadan üretir', async () => {
+    await exportTransitionProject();
+  }, 900_000);
+  it.skipIf(!XFADE_FFMPEG)('xfade birleştirme yolunda da tam 630 kare üretir (Windows yolu)', async () => {
+    await exportTransitionProject(XFADE_FFMPEG);
   }, 900_000);
 });

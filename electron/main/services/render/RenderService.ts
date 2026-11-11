@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { sanitizeFilename } from '../../../../shared/utils.js';
-import { buildPlaybackTimeline, exportTransitionKind, FRAME_RATE, FIRST_SCENE_FADE_SECONDS, HARD_CUT_OVERLAP_SECONDS, outgoingTransitionSeconds, snapToFrame } from '../../../../shared/playback.js';
+import { buildPlaybackTimeline, exportTransitionKind, FRAME_RATE, FIRST_SCENE_FADE_SECONDS, outgoingTransitionSeconds, snapToFrame } from '../../../../shared/playback.js';
 import type { AppSettings, ChannelIdentity, ExportProgress, ExportRecord, Scene } from '../../../../shared/types.js';
 import { DEFAULT_IDENTITY } from '../../../../shared/defaults.js';
 import { renderAnimatedSceneSvg } from '../../../../shared/visuals/sceneAnimation.js';
@@ -99,7 +99,8 @@ export class RenderService {
     const work = dirname(outputPath); let current = segments[0];
     for (let index = 1; index < segments.length; index += 1) {
       if (signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
-      const scene = scenes[index]; const crossfade = scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : outgoingTransitionSeconds(timeline as never, index - 1);
+      // Sert kesme = pencere yok; aşağıdaki birleştirme iki yönlü concat dalını kullanır.
+      const crossfade = outgoingTransitionSeconds(timeline as never, index - 1);
       const stage = join(work, `mix-${index}.mp4`);
       await this.concatWithCrossfade(`${exportId}-mix-${index}`, current, segments[index], crossfade, timeline.starts[index], stage, signal);
       current = stage;
@@ -191,8 +192,18 @@ export class RenderService {
           // first segment when MP4 time bases/start timestamps differ.
           segments.forEach((_, index) => filters.push(`[${index}:v]settb=AVTB,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v${index}]`));
           for (let index = 1; index < segments.length; index += 1) {
-            const scene = project.scenes[index]; const crossfade = scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : outgoingTransitionSeconds(timeline, index - 1);
+            const scene = project.scenes[index];
             const input = index === 1 ? '[v0]' : `[vx${index - 1}]`; const output = `[vx${index}]`;
+            // Sert kesmede xfade KULLANILMAZ: `duration=0.01` (yarım kare) bir xfade
+            // zinciri Windows FFmpeg'inde geçiş noktasından sonrasını üretmez ve
+            // dışa aktarım 495/630 karede kalır. Kesme için `concat` doğru araç:
+            // bindirme yok, kare kaybı yok, siyah kare yok.
+            if (scene.transition === 'none') {
+              // concat çıktısı bir sonraki xfade için ortak zaman tabanına geri alınır.
+              filters.push(`${input}[v${index}]concat=n=2:v=1:a=0,settb=AVTB,setpts=PTS-STARTPTS,fps=30${output}`);
+              continue;
+            }
+            const crossfade = outgoingTransitionSeconds(timeline, index - 1);
             // Kaydırma dışındaki her geçiş xfade'in doğrusal `fade` karışımıdır
             // (bkz. exportTransitionKind): ne siyah kare ne de gürültülü `dissolve`.
             const kind = exportTransitionKind(scene.transition);
