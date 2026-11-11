@@ -26,6 +26,12 @@ const execFileAsync = promisify(execFile);
 const directory = await mkdtemp(join(tmpdir(), 'nedenmis-parity-'));
 afterAll(async () => { await rm(directory, { recursive: true, force: true }); });
 
+async function meanLuminance(path: string): Promise<number> {
+  const data = await sharp(path).greyscale().raw().toBuffer();
+  let sum = 0; for (const value of data) sum += value;
+  return sum / Math.max(1, data.length);
+}
+
 async function meanDifference(left: string, right: string): Promise<number> {
   const [a, b] = await Promise.all([left, right].map(async (path) => sharp(path).resize(216, 384).removeAlpha().raw().toBuffer()));
   let sum = 0; for (let index = 0; index < a.length; index += 1) sum += Math.abs(a[index] - b[index]);
@@ -125,7 +131,7 @@ describe('Önizleme ve MP4 dışa aktarımı aynı zaman modelini kullanır', ()
     }
 
     // --- Geçiş penceresi: paylaşılan geçiş anı dışa aktarımla aynı olmalı ---
-    const transitionWindows: Array<Record<string, unknown>> = [];
+    const transitionWindows: Array<Record<string, unknown>> = []; const blackFrameReport: Array<Record<string, unknown>> = [];
     for (const index of [1, 2, 3]) {
       const state = transitionAt(timeline, timeline.starts[index] + CROSSFADE_SECONDS / 2);
       expect(state, `sahne ${index + 1} geçişi`).toBeTruthy();
@@ -139,6 +145,23 @@ describe('Önizleme ve MP4 dışa aktarımı aynı zaman modelini kullanır', ()
       await sharp(Buffer.from(renderAnimatedSceneSvg(project, project.scenes[index], DEFAULT_IDENTITY, CROSSFADE_SECONDS / 2))).resize(1080, 1920).png().toFile(incomingOnly);
       const outgoingOnly = join(evidence, `transition-${index}-outgoing.png`);
       await sharp(Buffer.from(renderAnimatedSceneSvg(project, project.scenes[index - 1], DEFAULT_IDENTITY, timeline.starts[index] + CROSSFADE_SECONDS / 2))).resize(1080, 1920).png().toFile(outgoingOnly);
+      // --- Siyah kare denetimi: geçiş penceresinin HİÇBİR karesi kararmamalı ---
+      const luminance: Array<{ time: number; value: number }> = [];
+      for (let step = -4; step <= 12; step += 1) {
+        const sampleTime = timeline.starts[index] + step * .04;
+        if (sampleTime <= 0 || sampleTime >= expectedDuration - .05) continue;
+        const framePath = join(evidence, `transition-${index}-luma-${step}.png`);
+        await ffmpeg.run(`parity-luma-${index}-${step}`, ['-ss', String(sampleTime.toFixed(3)), '-i', record.outputPath, '-frames:v', '1', '-vf', 'scale=108:192', '-update', '1', framePath]);
+        luminance.push({ time: Number(sampleTime.toFixed(3)), value: await meanLuminance(framePath) });
+      }
+      const beforeFrames = luminance.filter((sample) => sample.time <= timeline.starts[index]);
+      const afterFrames = luminance.filter((sample) => sample.time >= timeline.starts[index] + CROSSFADE_SECONDS);
+      expect(beforeFrames.length).toBeGreaterThan(0); expect(afterFrames.length).toBeGreaterThan(0);
+      const baseline = Math.min(...[...beforeFrames, ...afterFrames].map((sample) => sample.value));
+      // En düşük geçiş karesi, komşu sahnelerin parlaklığının %60'ının altına düşmemeli.
+      const darkest = luminance.reduce((min, sample) => sample.value < min.value ? sample : min);
+      blackFrameReport.push({ scene: index + 1, type: project.scenes[index].transition, baselineLuminance: Number(baseline.toFixed(2)), darkest: { ...darkest, value: Number(darkest.value.toFixed(2)) }, samples: luminance.map((sample) => ({ time: sample.time, value: Number(sample.value.toFixed(2)) })) });
+      expect(darkest.value, `sahne ${index + 1} geçişinde siyah kare (t=${darkest.time})`).toBeGreaterThan(baseline * .6);
       const toIncoming = await meanDifference(blend, incomingOnly);
       const toOutgoing = await meanDifference(blend, outgoingOnly);
       transitionWindows.push({ scene: index + 1, type: project.scenes[index].transition, progress: state!.progress, differenceToIncoming: Number(toIncoming.toFixed(4)), differenceToOutgoing: Number(toOutgoing.toFixed(4)) });
@@ -172,7 +195,7 @@ describe('Önizleme ve MP4 dışa aktarımı aynı zaman modelini kullanır', ()
       video: { width: video.width, height: video.height, fps: video.r_frame_rate, codec: video.codec_name },
       audio: { codec: audio.codec_name, sampleRate: audio.sample_rate, channels: audio.channels },
       transitions: project.scenes.map((scene) => ({ number: scene.number, duration: scene.duration, transition: scene.transition, preset: scene.animation?.preset })),
-      boundaryReport, transitionWindows, subtitleCues: allCues.length, subtitleRange: { start: allCues[0].start, end: allCues.at(-1)!.end },
+      boundaryReport, transitionWindows, blackFrameReport, subtitleCues: allCues.length, subtitleRange: { start: allCues[0].start, end: allCues.at(-1)!.end },
       mp4: retainVerificationArtifacts(record.outputPath, 'build20-parity/buz-52s.mp4'),
     }, null, 2), 'utf8');
     retainVerificationArtifacts(join(evidence, 'parity-report.json'), 'build20-parity/evidence/parity-report.json');

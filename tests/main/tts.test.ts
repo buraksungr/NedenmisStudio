@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppDatabase } from '../../electron/main/infrastructure/database/Database.js';
 import { MediaRepository } from '../../electron/main/infrastructure/database/MediaRepository.js';
 import { ProjectRepository } from '../../electron/main/infrastructure/database/ProjectRepository.js';
@@ -45,5 +45,30 @@ describe('TTS sağlayıcı yönlendirmesi', () => {
     const db = new AppDatabase(':memory:'); const settings = new SettingsRepository(db); const referencePath = join(directory, 'reference.wav'); await writeFile(referencePath, 'reference');
     const manager = new VoiceEngineManager(() => directory, join(process.cwd(), 'voice-engine'), settings, new Logger(join(directory, 'logs')), () => referencePath, () => undefined); const provider = new ChatterboxProvider(manager, new FFmpegService(() => undefined), () => directory, () => referencePath);
     await expect(provider.synthesize({ text: 'Gerçek model yok', selection: { providerId: provider.id, voiceId: 'reference-tr', speed: 1, pitch: 0 } }, join(directory, 'output.wav'))).rejects.toThrow('Chatterbox henüz kurulmadı'); expect((await manager.status()).verifiedAt).toBeUndefined(); manager.close(); db.close();
+  });
+});
+
+describe('TTS sağlayıcı seçimi — sessiz motor değişimi yok', () => {
+  it('seçili sağlayıcı yoksa başka motora geçmeden hata verir', async () => {
+    const { TtsService } = await import('../../electron/main/services/tts/TtsService.js');
+    const service = new TtsService({} as never, {} as never, new Map(), () => '/tmp');
+    await expect(service.preview({ text: 'Merhaba', selection: { providerId: 'chatterbox-multilingual-v3', voiceId: 'reference-tr', speed: 1, pitch: 0 } }))
+      .rejects.toThrow(/Otomatik olarak başka bir motora geçilmedi/);
+  });
+
+  it('Chatterbox sağlayıcısı seçim kimliği uyuşmazsa üretim yapmaz', async () => {
+    const { ChatterboxProvider } = await import('../../electron/main/services/tts/ChatterboxProvider.js');
+    const manager = { synthesize: vi.fn() } as never;
+    const provider = new ChatterboxProvider(manager, { run: vi.fn() } as never, () => '/tmp', () => '/tmp/reference.wav');
+    await expect(provider.synthesize({ text: 'Merhaba', selection: { providerId: 'windows-sapi', voiceId: 'tr', speed: 1, pitch: 0 } }, '/tmp/out.wav'))
+      .rejects.toThrow(/başka bir motora geçilmedi/);
+  });
+
+  it('Chatterbox hata verirse çıktı başka motorla doldurulmaz', async () => {
+    const { ChatterboxProvider } = await import('../../electron/main/services/tts/ChatterboxProvider.js');
+    const manager = { synthesize: vi.fn().mockRejectedValue(new Error('model yüklenemedi')) } as never;
+    const provider = new ChatterboxProvider(manager, { run: vi.fn() } as never, () => '/tmp', () => '/tmp/reference.wav');
+    await expect(provider.synthesize({ text: 'Merhaba', selection: { providerId: 'chatterbox-multilingual-v3', voiceId: 'reference-tr', speed: 1, pitch: 0 } }, '/tmp/out.wav'))
+      .rejects.toThrow(/Chatterbox klonlama başarısız: model yüklenemedi/);
   });
 });

@@ -25,6 +25,21 @@ const CASES = [
   { id: 'ordinal-and-percent', text: 'Yarışmada üçüncü oldu; sıcaklık yüzde on dört virgül beş arttı.', marker: 'üçüncü' },
 ];
 
+/**
+ * Kurulu paketin kimliğini doğrudan yönetilen Python üzerinden okur.
+ * Ayarlar veritabanındaki bayraklara güvenmek, yanlış kurulumu gizleyebilir.
+ */
+async function readInstalledIdentity(context: { voiceEngine: { status(): Promise<{ componentPath: string }> }; settings?: unknown }): Promise<{ mtlTtsSha256?: string; tokenizerSha256?: string; v3Supported?: boolean; packageVersion?: string }> {
+  const { componentPath } = await context.voiceEngine.status();
+  const python = process.env.NEDENMIS_VOICE_PYTHON || (process.platform === 'win32' ? join(componentPath, 'runtime', 'python.exe') : join(componentPath, 'runtime', 'bin', 'python'));
+  expect(existsSync(python), `yönetilen Python bulunamadı: ${python}`).toBe(true);
+  const { stdout } = await execFileAsync(python, [join(process.cwd(), 'voice-engine', 'bridge.py'), 'status'], { env: { ...process.env, HF_HOME: join(componentPath, 'models'), PYTHONIOENCODING: 'utf-8', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1' }, timeout: 300_000 });
+  const line = stdout.split('\n').filter((item) => item.includes('"event": "status"')).at(-1);
+  if (!line) throw new Error(`bridge.py status çıktısı okunamadı: ${stdout.slice(-500)}`);
+  const parsed = JSON.parse(line) as { mtl_tts_sha256?: string; tokenizer_sha256?: string; v3_supported?: boolean; package_version?: string };
+  return { mtlTtsSha256: parsed.mtl_tts_sha256, tokenizerSha256: parsed.tokenizer_sha256, v3Supported: parsed.v3_supported, packageVersion: parsed.package_version };
+}
+
 describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değerlendirmesi', () => {
   it('yedi Türkçe vakayı üretir, WAV kimliğini doğrular ve ASR raporu yazar', async () => {
     const storage = resolve(process.env.NEDENMIS_CHATTERBOX_STORAGE || join(process.cwd(), '.chatterbox-test-storage'));
@@ -36,11 +51,14 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
     try {
       const status = await context.voiceEngine.status();
       expect(status.runtimeInstalled, 'yönetilen Python kurulu olmalı').toBe(true);
-      expect(status.dependenciesInstalled, 'Chatterbox V3 bağımlılıkları kurulu olmalı').toBe(true);
       expect(status.modelDownloaded, 'Multilingual V3 ağırlıkları indirilmiş olmalı').toBe(true);
-      // Paket kimliği: sürüm numarası değil, sabitlenen kaynağın dosya özetleri doğrulanır.
-      expect(status.chatterboxSourceSha256, 'kurulu mtl_tts.py özeti').toBe('936759044e54cffe8c68b91b32e01da0bc032a1e084f769f0403080d86ad153c');
-      expect(status.chatterboxTokenizerSha256, 'kurulu tokenizer özeti').toBe('e169f02f14b008e8e7a4f29df66ecafaa29972ff4a38724b51545b8563861889');
+      // Paket kimliği ayarlar veritabanından DEĞİL, kurulu paketin kendisinden okunur:
+      // `bridge.py status` gerçek dosya özetlerini ve paket sürümünü bildirir.
+      const installed = await readInstalledIdentity(context);
+      expect(installed.mtlTtsSha256, 'kurulu mtl_tts.py özeti').toBe('936759044e54cffe8c68b91b32e01da0bc032a1e084f769f0403080d86ad153c');
+      expect(installed.tokenizerSha256, 'kurulu tokenizer özeti').toBe('e169f02f14b008e8e7a4f29df66ecafaa29972ff4a38724b51545b8563861889');
+      expect(installed.v3Supported, 'kurulu paket V3 desteklemeli').toBe(true);
+      expect(installed.packageVersion, 'chatterbox-tts sürümü').toBeTruthy();
       const reference = process.env.NEDENMIS_CHATTERBOX_TURKISH_REFERENCE;
       if (!reference || !existsSync(reference)) throw new Error('Gerçek Türkçe referans ses gerekli (NEDENMIS_CHATTERBOX_TURKISH_REFERENCE).');
       const imported = await context.media.importReference(reference);
@@ -65,7 +83,8 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
         expect(preview.engine?.unknownTokens).toBe(0);
         expect(preview.engine?.decodedText).toContain('[tr]');
         const asrPath = join(outputDirectory, `${item.id}-asr.json`);
-        const { stdout } = await execFileAsync('python', ['scripts/turkish_asr_eval.py', '--audio', path, '--text', item.text, '--case', item.id, '--output', asrPath]);
+        const asrPython = process.env.NEDENMIS_ASR_PYTHON || process.env.NEDENMIS_VOICE_PYTHON || 'python';
+        const { stdout } = await execFileAsync(asrPython, ['scripts/turkish_asr_eval.py', '--audio', path, '--text', item.text, '--case', item.id, '--output', asrPath]);
         const asr = JSON.parse(stdout.trim().split('\n').at(-1)!) as { status: string; cer?: number; wer?: number };
         report.push({ id: item.id, text: item.text, audio: path, duration: probe.duration, meanDb: Number(mean), checkpoint: preview.engine?.checkpoint, asrStatus: asr.status, cer: asr.cer, wer: asr.wer, asrReport: asrPath });
         // ASR yoksa bu bir "başarı" değildir; sessizce geçilmez.

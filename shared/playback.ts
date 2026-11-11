@@ -6,8 +6,20 @@ import type { Scene } from './types.js';
  * oynatma başlığındaki (playhead) sahne seçimi buradan hesaplanır.
  */
 
-/** Geçişli sahnelerde xfade/soluklaşma penceresinin süresi (saniye). */
-export const CROSSFADE_SECONDS = 0.32;
+/** Önizleme ve dışa aktarımın ortak kare hızı. */
+export const FRAME_RATE = 30;
+
+/**
+ * Verilen değeri en yakın tam kareye (30 FPS) oturtur. Geçiş pencereleri ve
+ * kesme noktaları tam kare olmazsa birleştirme sırasında kareler tekilleşir ve
+ * toplam kare sayısı beklenenden düşük çıkar (ör. 52 s'lik kurgu 20 s'ye iner).
+ */
+export function snapToFrame(seconds: number): number {
+  return Math.round(seconds * FRAME_RATE) / FRAME_RATE;
+}
+
+/** Geçişli sahnelerde xfade/soluklaşma penceresinin süresi (saniye) — 9 kare. */
+export const CROSSFADE_SECONDS = 10 / FRAME_RATE;
 /** `transition: 'none'` sahnelerde iki klip arasında bırakılan en küçük bindirme. */
 export const HARD_CUT_OVERLAP_SECONDS = 0.01;
 /** İlk sahnenin giriş soluklaşması en fazla bu süre kadar sürer. */
@@ -82,7 +94,11 @@ export function sceneLocalTime(timeline: PlaybackTimeline, index: number, time: 
 export function outgoingTransitionSeconds(timeline: PlaybackTimeline, index: number): number {
   const next = timeline.slots[index + 1];
   if (!next) return 0;
-  return next.scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : CROSSFADE_SECONDS;
+  // Sert kesmede bindirme yok: 10 ms'lik bir pencere 30 FPS'te yarım karedir ve
+  // birleştirmede kare tekilleşmesine yol açar. Kesme, pencere başlangıcında
+  // doğrudan yeni sahneye geçer (aşağıdaki transitionAt ile aynı kural).
+  if (next.scene.transition === 'none') return 0;
+  return snapToFrame(CROSSFADE_SECONDS);
 }
 
 export interface TransitionState {
@@ -104,7 +120,9 @@ export function transitionAt(timeline: PlaybackTimeline, time: number): Transiti
   const safe = clampPlayhead(time, timeline.duration);
   for (let index = 1; index < timeline.slots.length; index += 1) {
     const slot = timeline.slots[index];
-    const duration = slot.scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : CROSSFADE_SECONDS;
+    // Sert kesmede pencere yoktur: sınırda doğrudan yeni sahne gösterilir.
+    if (slot.scene.transition === 'none') return slot.start === safe ? { outgoingIndex: index - 1, incomingIndex: index, progress: 1, duration: 0 } : undefined;
+    const duration = CROSSFADE_SECONDS;
     if (safe >= slot.start && safe < slot.start + duration) {
       return { outgoingIndex: index - 1, incomingIndex: index, progress: (safe - slot.start) / duration, duration };
     }
@@ -122,6 +140,21 @@ export function openingFadeOpacity(timeline: PlaybackTimeline, time: number): nu
   const fade = Math.min(FIRST_SCENE_FADE_SECONDS, first.duration / 3);
   if (fade <= 0) return 1;
   return clampPlayhead(time, fade) / fade;
+}
+
+/**
+ * Önizlemedeki geçiş türünü xfade karşılığına çevirir.
+ *
+ * Kaynak doğrulaması (FFmpeg n6.1 `libavfilter/vf_xfade.c`):
+ *  - `fade` → `mix(xf0, xf1, progress)`, yani düz doğrusal karışım; siyah kare yok.
+ *  - `dissolve` → `smooth >= 0.5 ? a : b`, yani piksel gürültüsüyle anlık seçim;
+ *    yumuşak bir karışım DEĞİL.
+ * Önizleme "fade" ve "dissolve" geçişlerini alfa karışımı olarak çizdiği için
+ * ikisi de xfade'de `fade`ya karşılık gelir. `dissolve`a eşlemek önizlemeden
+ * görünür biçimde farklı, gürültülü bir geçiş üretirdi.
+ */
+export function exportTransitionKind(transition: Scene['transition']): 'fade' | 'slideleft' {
+  return transition === 'slide' ? 'slideleft' : 'fade';
 }
 
 /** Sahne sınırlarında oynatma başlığı için kullanılabilir hedef listesi. */

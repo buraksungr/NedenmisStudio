@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPlaybackTimeline, clampPlayhead, openingFadeOpacity, outgoingTransitionSeconds, sceneBoundaries,
-  sceneIndexAt, sceneLocalTime, transitionAt, CROSSFADE_SECONDS, HARD_CUT_OVERLAP_SECONDS,
+  sceneIndexAt, sceneLocalTime, transitionAt, CROSSFADE_SECONDS, FRAME_RATE, snapToFrame,
 } from '../../shared/playback.js';
 import type { Scene } from '../../shared/types.js';
 import { createIceAnimationProject } from '../fixtures/iceAnimationProject.js';
@@ -39,10 +39,17 @@ describe('Paylaşılan oynatma zaman modeli', () => {
     expect(outgoingTransitionSeconds(fade, 0)).toBe(CROSSFADE_SECONDS);
     expect(outgoingTransitionSeconds(fade, 2)).toBe(0);
     expect(transitionAt(fade, 2.1)?.incomingIndex).toBe(1);
-    expect(transitionAt(fade, 2.1)?.progress).toBeCloseTo(.3125, 4);
+    // Pencerenin ortası tam olarak 0.5 olmalı — pencere artık tam kareye oturur.
+    expect(transitionAt(fade, 2 + CROSSFADE_SECONDS / 2)?.progress).toBeCloseTo(.5, 6);
+    expect(transitionAt(fade, 2.1)?.progress).toBeCloseTo(.1 / CROSSFADE_SECONDS, 4);
+    // Pencere tam kare olmalı; yarım karelik pencereler birleştirmede kare yutar.
+    expect(Math.round(CROSSFADE_SECONDS * FRAME_RATE)).toBeCloseTo(CROSSFADE_SECONDS * FRAME_RATE, 9);
     expect(transitionAt(fade, 1.5)).toBeUndefined();
+    // Sert kesme: bindirme yok, sınırda doğrudan yeni sahne.
     const cuts = buildPlaybackTimeline(scenesOf([2, 2], 'none'));
-    expect(outgoingTransitionSeconds(cuts, 0)).toBe(HARD_CUT_OVERLAP_SECONDS);
+    expect(outgoingTransitionSeconds(cuts, 0)).toBe(0);
+    expect(transitionAt(cuts, 1.999)).toBeUndefined();
+    expect(transitionAt(cuts, 2)?.incomingIndex).toBe(1);
   });
 
   it('ilk sahnenin açılış soluklaşması dışa aktarımla aynı eğridedir', () => {
@@ -60,5 +67,14 @@ describe('Paylaşılan oynatma zaman modeli', () => {
     expect(timeline.duration).toBeCloseTo(50, 6);
     expect(timeline.starts).toEqual([0, 12.5, 25, 37.5]);
     expect(sceneIndexAt(timeline, 49.9)).toBe(3);
+  });
+
+  it('geçiş pencereleri tam kareye oturur ve kare kaybını önler', () => {
+    // Ölçülen hata: tam kare olmayan pencere, birleştirmede kare tekilleşmesine
+    // ve 21 saniyelik kurgunun 20.9 saniyeye inmesine yol açıyordu.
+    for (const value of [0.3333333, 0.32, 1.017, 2.4999]) expect(snapToFrame(value) * FRAME_RATE).toBeCloseTo(Math.round(snapToFrame(value) * FRAME_RATE), 9);
+    const timeline = buildPlaybackTimeline(scenesOf([5, 6, 5.5, 4.5]));
+    expect(timeline.duration).toBe(21);
+    expect(outgoingTransitionSeconds(timeline, 0) * FRAME_RATE).toBeCloseTo(Math.round(outgoingTransitionSeconds(timeline, 0) * FRAME_RATE), 9);
   });
 });

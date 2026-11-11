@@ -1,10 +1,12 @@
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { copyFile, mkdir, rm, stat } from 'node:fs/promises';
+import { promisify } from 'node:util';
+import { dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { sanitizeFilename } from '../../../../shared/utils.js';
-import { buildPlaybackTimeline, FIRST_SCENE_FADE_SECONDS, HARD_CUT_OVERLAP_SECONDS, outgoingTransitionSeconds } from '../../../../shared/playback.js';
-import type { AppSettings, ChannelIdentity, ExportProgress, ExportRecord } from '../../../../shared/types.js';
+import { buildPlaybackTimeline, exportTransitionKind, FRAME_RATE, FIRST_SCENE_FADE_SECONDS, HARD_CUT_OVERLAP_SECONDS, outgoingTransitionSeconds, snapToFrame } from '../../../../shared/playback.js';
+import type { AppSettings, ChannelIdentity, ExportProgress, ExportRecord, Scene } from '../../../../shared/types.js';
 import { DEFAULT_IDENTITY } from '../../../../shared/defaults.js';
 import { renderAnimatedSceneSvg } from '../../../../shared/visuals/sceneAnimation.js';
 import type { ProjectRepository } from '../../infrastructure/database/ProjectRepository.js';
@@ -26,6 +28,8 @@ function writeFrame(stdin: Writable, frame: Buffer, signal: AbortSignal): Promis
 }
 
 sharp.cache({ memory: 32, files: 0, items: 20 });
+
+const execFileAsync = promisify(execFile);
 
 const PRESETS: Record<AppSettings['exportPreset'], Preset> = {
   draft: { width: 540, height: 960, crf: 26, preset: 'ultrafast', bitrate: '128k' },
@@ -50,6 +54,60 @@ export class RenderService {
     return this.exports.get(record.id);
   }
 
+  /**
+   * İki video parçasını çapraz sönümle birleştirir: A*(1-t)+B*t.
+   *
+   * Kareler ZAMANLA değil KARE NUMARASIYLA kesilir. `trim=start:end` saniye
+   * tabanlı olduğunda yarım kalan kareler düşüyor ve 21 saniyelik kurgu 20.9
+   * saniyeye iniyordu (ölçüldü: 627/630 kare). `trim=start_frame:end_frame`
+   * + `setpts=PTS-STARTPTS` her parçayı tam kare sayısıyla üretir (ölçüldü: 630).
+   */
+  private async concatWithCrossfade(exportId: string, left: string, right: string, crossfade: number, boundary: number, stage: string, signal: AbortSignal): Promise<void> {
+    // Sert kesmede (pencere 0) bindirme yoktur: soldaki parça sınıra kadar, sağdaki
+    // parça tamamen eklenir. 1 karelik yapay pencere bir kareyi yutuyordu (629/630).
+    const windowFrames = Math.max(0, Math.round(snapToFrame(crossfade) * FRAME_RATE));
+    const boundaryFrames = Math.round(snapToFrame(Math.max(0, boundary)) * FRAME_RATE);
+    // setpts=PTS-STARTPTS ölçülerek seçildi: N/(30*TB) biçimi bir kare kaybediyordu.
+    const pts = 'setpts=PTS-STARTPTS';
+    const filter = windowFrames === 0
+      ? `[0:v]trim=start_frame=0:end_frame=${boundaryFrames},${pts},format=yuv420p[pre];[1:v]${pts},format=yuv420p[rest];[pre][rest]concat=n=2:v=1:a=0[out]`
+      : [
+        `[0:v]trim=start_frame=0:end_frame=${boundaryFrames},${pts},format=yuv420p[pre]`,
+        `[0:v]trim=start_frame=${boundaryFrames}:end_frame=${boundaryFrames + windowFrames},${pts},format=yuv420p[tail]`,
+        `[1:v]trim=start_frame=0:end_frame=${windowFrames},${pts},format=yuv420p[head]`,
+        `[tail][head]blend=all_expr='A*(1-(N/${windowFrames}))+B*(N/${windowFrames})',format=yuv420p[blended]`,
+        `[1:v]trim=start_frame=${windowFrames},${pts},format=yuv420p[rest]`,
+        '[pre][blended][rest]concat=n=3:v=1:a=0[out]',
+      ].join(';');
+    this.logger.info(`Geçiş filtresi: ${filter}`);
+    await this.ffmpeg.run(`${exportId}-mix`, ['-i', left, '-i', right, '-filter_complex', filter, '-map', '[out]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', '30', stage], { signal });
+    // Birleştirme kare kaybederse sessizce devam etmek yok. Beklenen toplam:
+    // soldaki parçanın kesme noktasına kadarki kareleri + sağdaki parçanın TAMAMI
+    // (pencere sağdan alınır, kalan kısmı ayrıca eklenir).
+    const countFrames = async (file: string) => {
+      const probe = JSON.parse((await execFileAsync(this.ffmpeg.ffprobePath, ['-v', 'error', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'json', file])).stdout) as { streams?: Array<{ nb_read_frames?: string }> };
+      return Number(probe.streams?.[0]?.nb_read_frames || 0);
+    };
+    const frames = await countFrames(stage);
+    const expected = boundaryFrames + await countFrames(right);
+    this.logger.info(`Geçiş sonucu: ${frames} kare (beklenen ${expected}); pencere ${windowFrames} kesme ${boundaryFrames}`);
+    if (frames !== expected) throw new Error(`Geçiş birleştirmesi kare kaybetti: ${frames} / ${expected} (kesme ${boundary}s, pencere ${crossfade}s).`);
+  }
+
+  /** xfade bulunmayan FFmpeg için sahne parçalarını sırayla çapraz karışımla birleştirir. */
+  private async crossfadeWithoutXfade(exportId: string, segments: string[], scenes: Scene[], timeline: { starts: number[] }, outputPath: string, signal: AbortSignal, record: ExportRecord): Promise<void> {
+    const work = dirname(outputPath); let current = segments[0];
+    for (let index = 1; index < segments.length; index += 1) {
+      if (signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
+      const scene = scenes[index]; const crossfade = scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : outgoingTransitionSeconds(timeline as never, index - 1);
+      const stage = join(work, `mix-${index}.mp4`);
+      await this.concatWithCrossfade(`${exportId}-mix-${index}`, current, segments[index], crossfade, timeline.starts[index], stage, signal);
+      current = stage;
+      this.report(record, 56 + index / segments.length * 10, `Geçiş ${index}/${segments.length - 1} çapraz karışımla birleştiriliyor`);
+    }
+    await copyFile(current, outputPath);
+  }
+
   private report(record: ExportRecord, progress: number, stage: string): void {
     const normalized = Math.max(0, Math.min(100, Math.round(progress))); if (normalized % 2 === 0 || normalized >= 99) this.exports.update(record.id, { progress: normalized });
     this.onProgress({ exportId: record.id, projectId: record.projectId, progress: normalized, stage });
@@ -64,7 +122,11 @@ export class RenderService {
       for (let index = 0; index < project.scenes.length; index += 1) {
         if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
         const scene = project.scenes[index]; const path = join(work, `scene-${String(index).padStart(2, '0')}.mp4`); const isLast = index === project.scenes.length - 1;
-        const nextTransition = !isLast && supportsXfade ? outgoingTransitionSeconds(timeline, index) : 0; const segmentDuration = scene.duration + nextTransition;
+        // Geçiş penceresi xfade'e BAĞLI DEĞİL: xfade yoksa aynı pencere blend tabanlı
+        // birleştirmede kullanılır. Bu yüzden her sahne parçası, gelen geçişin
+        // penceresi kadar FAZLA render edilir; aksi hâlde birleştirme için
+        // bindirilecek kare kalmaz ve toplam süre kısalır.
+        const nextTransition = !isLast ? outgoingTransitionSeconds(timeline, index) : 0; const segmentDuration = scene.duration + nextTransition;
         const proceduralAnimation = scene.assetType === 'procedural' && scene.animation?.enabled !== false;
         const frames = Math.max(1, Math.ceil(segmentDuration * 30));
         const args: string[] = [];
@@ -85,8 +147,8 @@ export class RenderService {
           }
         }
         if (index === 0 && scene.transition !== 'none') filter += `,fade=t=in:st=0:d=${Math.min(FIRST_SCENE_FADE_SECONDS, scene.duration / 3)}`;
-        if (!supportsXfade && index > 0 && scene.transition !== 'none') filter += ',fade=t=in:st=0:d=0.18';
-        if (!supportsXfade && !isLast && project.scenes[index + 1].transition !== 'none') filter += `,fade=t=out:st=${Math.max(0, segmentDuration - .18)}:d=0.18`;
+        // xfade yoksa geçişler karartma ile DEĞİL, aşağıdaki blend tabanlı
+        // çapraz karışımla yapılır; burada ek fade eklenirse siyah kare oluşur.
         args.push('-vf', filter);
         // Raw frames already have an exact count. An additional -t can truncate
         // the overlap frame required by xfade at the segment boundary.
@@ -110,28 +172,39 @@ export class RenderService {
         } else {
           await this.ffmpeg.run(`${exportId}-scene-${index}`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 5 + (index + Math.min(1, seconds / segmentDuration)) / project.scenes.length * 48, `Sahne ${index + 1}/${project.scenes.length} işleniyor`) });
         }
+        if (process.env.NEDENMIS_RENDER_DEBUG === '1') { const piece = await this.ffmpeg.probe(path); this.logger.info(`Sahne parçası ${index}: ${piece.frames} kare / ${piece.duration}s (beklenen ${Math.ceil(segmentDuration * 30)})`); }
         segments.push(path);
       }
       if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
       const visualPath = join(work, 'visual.mp4'); this.report(record, 56, 'Geçişler birleştiriliyor');
       if (segments.length === 1) await this.ffmpeg.run(`${exportId}-visual`, ['-i', segments[0], '-c', 'copy', visualPath], { signal: controller.signal });
-      else if (supportsXfade) {
-        const args: string[] = []; for (const segment of segments) args.push('-i', segment); const filters: string[] = [];
-        // Windows FFmpeg builds can otherwise terminate chained xfade after the
-        // first segment when MP4 time bases/start timestamps differ.
-        segments.forEach((_, index) => filters.push(`[${index}:v]settb=AVTB,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v${index}]`));
-        for (let index = 1; index < segments.length; index += 1) {
-          const scene = project.scenes[index]; const kind = scene.transition === 'dissolve' ? 'dissolve' : scene.transition === 'slide' ? 'slideleft' : 'fade'; const crossfade = scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : outgoingTransitionSeconds(timeline, index - 1);
-          const input = index === 1 ? '[v0]' : `[vx${index - 1}]`; const output = index === segments.length - 1 ? '[vout]' : `[vx${index}]`;
-          filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${crossfade}:offset=${starts[index].toFixed(6)}${output}`);
+      else {
+        // xfade zinciri: her sahne parçası kendi süresi + gelen geçiş süresi kadar
+        // render edilir; xfade `offset` geçişin kurgu içindeki başlangıcıdır.
+        // xfade yoksa aynı çapraz sönüm `blend` tabanlı birleştirmeyle kurulur —
+        // asla `fade=t=out/in` ile, çünkü o siyah kare üretir.
+        if (!supportsXfade) {
+          await this.crossfadeWithoutXfade(exportId, segments, project.scenes, timeline, visualPath, controller.signal, record);
+        } else {
+          const args: string[] = []; for (const segment of segments) args.push('-i', segment); const filters: string[] = [];
+          // Windows FFmpeg builds can otherwise terminate chained xfade after the
+          // first segment when MP4 time bases/start timestamps differ.
+          segments.forEach((_, index) => filters.push(`[${index}:v]settb=AVTB,setpts=PTS-STARTPTS,fps=30,format=yuv420p[v${index}]`));
+          for (let index = 1; index < segments.length; index += 1) {
+            const scene = project.scenes[index]; const crossfade = scene.transition === 'none' ? HARD_CUT_OVERLAP_SECONDS : outgoingTransitionSeconds(timeline, index - 1);
+            const input = index === 1 ? '[v0]' : `[vx${index - 1}]`; const output = `[vx${index}]`;
+            // Kaydırma dışındaki her geçiş xfade'in doğrusal `fade` karışımıdır
+            // (bkz. exportTransitionKind): ne siyah kare ne de gürültülü `dissolve`.
+            const kind = exportTransitionKind(scene.transition);
+            filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${crossfade}:offset=${starts[index].toFixed(6)}${output}`);
+          }
+          args.push('-filter_complex', filters.join(';'), '-map', `[vx${segments.length - 1}]`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', visualPath);
+          await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / duration * 10), 'Sahne geçişleri işleniyor') });
         }
-        args.push('-filter_complex', filters.join(';'), '-map', '[vout]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', visualPath);
-        await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / duration * 10), 'Sahne geçişleri işleniyor') });
-      } else {
-        const concatPath = join(work, 'concat.txt');
-        await writeFile(concatPath, segments.map((path) => `file '${path.replaceAll('\\', '/').replaceAll("'", "'\\''")}'`).join('\n'), 'utf8');
-        await this.ffmpeg.run(`${exportId}-visual`, ['-f', 'concat', '-safe', '0', '-i', concatPath, '-c', 'copy', visualPath], { signal: controller.signal });
       }
+      // Teşhis: geçiş birleştirmesinden çıkan video beklenen kare sayısını taşımalı.
+      const visualProbe = await this.ffmpeg.probe(visualPath);
+      this.logger.info(`Geçiş sonrası video: ${visualProbe.frames ?? '?'} kare, ${visualProbe.duration}s (beklenen ${Math.ceil(duration * 30)} kare, ${duration}s)`);
       this.report(record, 68, 'Ses kanalları miksajlanıyor'); const audioPath = join(work, 'mix.m4a');
       await this.audio.mix(`${exportId}-audio`, { narration: project.scenes.filter((scene) => scene.narrationPath).map((scene) => ({ path: scene.narrationPath!, start: starts[project.scenes.indexOf(scene)], volume: project.audio.narrationVolume })), music: project.audio.musicClips, sfx: project.audio.sfxClips, musicVolume: project.audio.musicVolume, sfxVolume: project.audio.sfxVolume, duration, ducking: project.audio.musicDucking }, audioPath);
       this.report(record, 78, 'Altyazılar ve video birleştiriliyor'); const assPath = join(work, 'subtitles.ass'); await this.subtitles.write(project, assPath);

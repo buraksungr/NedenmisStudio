@@ -104,9 +104,18 @@ jobs:
           NEDENMIS_TURKISH_TTS_E2E: '1'
           NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
           NEDENMIS_CHATTERBOX_TURKISH_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\turkish-reference.flac
-        shell: cmd
+          NEDENMIS_VOICE_PYTHON: ${{ runner.temp }}\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe
+        shell: pwsh
         run: |
-          npm run test:turkish-tts > release/turkish-tts-e2e.log 2>&1
+          # ASR yalnızca yönetilen Python'a kurulur; test de aynı yorumlayıcıyı kullanır.
+          $python = "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe"
+          & $python -m pip install --only-binary=:all: faster-whisper==1.2.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:NEDENMIS_ASR_PYTHON = $python
+          cmd /c "npm run test:turkish-tts > release/turkish-tts-e2e.log 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content release/turkish-tts-e2e.log -Tail 200
+          exit $code
           set CODE=%ERRORLEVEL%
           type release\turkish-tts-e2e.log
           exit /b %CODE%
