@@ -1,6 +1,7 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { generateSubtitleCues, sceneStartTimes } from '../../../../shared/utils.js';
+import { FRAME_RATE } from '../../../../shared/playback.js';
 import { normalizeTurkishForTts } from '../../../../shared/turkishTtsNormalization.js';
 import type { Project, TtsRequest, TtsResult, VoiceProviderDetails } from '../../../../shared/types.js';
 import type { ProjectRepository } from '../../infrastructure/database/ProjectRepository.js';
@@ -36,7 +37,15 @@ export class TtsService {
         scene.ttsText = normalizeTurkishForTts(scene.narration);
         const result = await provider.synthesize({ text: scene.ttsText, selection: project.voice, referenceVoicePath: this.reference() }, path);
         scene.ttsEngine = result.engine;
-        scene.narrationPath = path; scene.narrationDuration = result.duration; scene.duration = Math.max(1, Number((result.duration + .22).toFixed(3)));
+        scene.narrationPath = path; scene.narrationDuration = result.duration;
+        // Sahne süresi TAM KAREYE (yukarı) oturtulur. Önceki kod süreyi 3 ondalığa
+        // yuvarlıyordu (ör. 8.457 s = 253.71 kare). Kare ızgarasında olmayan bu
+        // değerler toplandığında (8.457 + 9.237 + 8.457 = 26.151 s = 784.53 kare)
+        // dışa aktarım `ceil` ile 785 kare beklerken yalnızca 784 tam kare
+        // üretilebiliyordu → Windows'ta "785/786 kare" hatası (CI 43267875513).
+        // Kare ızgarasına yukarı yuvarlamak hem anlatımın kesilmemesini hem de
+        // toplam kare sayısının tam sayı olmasını garanti eder.
+        scene.duration = Math.max(1, Math.ceil((result.duration + .22) * FRAME_RATE) / FRAME_RATE);
         scene.subtitleTiming = result.timingMode; (scene as typeof scene & { alignedCues?: unknown }).alignedCues = result.cues;
         const info = await stat(path); this.media.upsertByPath({ kind: 'narration', name: `${project.name} · Sahne ${scene.number}`, path, mimeType: mimeFor(provider.id), size: info.size, duration: result.duration, projectId: project.id });
         this.projects.update(project);
