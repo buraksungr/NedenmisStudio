@@ -47,7 +47,11 @@ export function generateSubtitleCues(text: string, duration: number, sceneStart 
   return phrases.map((phrase, index) => {
     const phraseDuration = duration * weights[index] / total;
     const cue: SubtitleCue = {
-      id: id('cue'), start: Number(cursor.toFixed(3)), end: Number((index === phrases.length - 1 ? sceneStart + duration : cursor + phraseDuration).toFixed(3)),
+      // Mutlak zamanlar 3 ondalığa yuvarlanır, ama sahne başlangıcından ÖNCE
+      // düşmemeli: 10.7333 → 10.733 yuvarlaması cue'yu sahnenin başından
+      // 0.33 ms öne taşıyordu (Windows CI 43284052377). İlk cue sahne başında başlar.
+      id: id('cue'), start: index === 0 ? Number(sceneStart.toFixed(3)) : Math.max(Number(sceneStart.toFixed(3)), Number(cursor.toFixed(3))), // Son cue sahne bitişini AŞMAZ (3 ondalık yuvarlama 8.4667 → 8.467 yapıyordu).
+      end: (() => { const raw = index === phrases.length - 1 ? sceneStart + duration : cursor + phraseDuration; return Math.min(Number(raw.toFixed(3)), Number((sceneStart + duration).toFixed(3))); })(),
       text: phrase,
       emphasis: phrase.split(/\s+/).filter((word) => /^\d|!|\?/.test(word) || word.length > 11).slice(0, 1),
     };
