@@ -49,6 +49,12 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
     const context = createAppContext(storage, join(storage, 'build20-tts.sqlite'), () => undefined, join(process.cwd(), 'voice-engine'), (progress) => console.log(`[V3 ${progress.stage}] ${progress.message}`));
     const report: Array<Record<string, unknown>> = [];
     try {
+      // ÖNEMLİ: e2e testi yönetilen bileşeni kurar ve durum bilgisini AYNI depolama
+      // klasöründeki ayar veritabanına yazar. Bu test kurulum yapmaz; ama kurulu
+      // bileşeni doğrulaması için durum kaydını gerçek dosyalardan yeniden üretir.
+      // Aksi hâlde doğru kurulu bir ortamda bile "Chatterbox henüz kurulmadı" hatası
+      // alınıyordu (CI 43033196862).
+      await context.voiceEngine.adoptInstalled();
       const status = await context.voiceEngine.status();
       expect(status.runtimeInstalled, 'yönetilen Python kurulu olmalı').toBe(true);
       expect(status.modelDownloaded, 'Multilingual V3 ağırlıkları indirilmiş olmalı').toBe(true);

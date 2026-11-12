@@ -258,17 +258,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          $mp4 = Get-ChildItem "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports\*.mp4" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $mp4) { Write-Error 'Geçiş sınırı denetimi için dışa aktarılmış MP4 bulunamadı.'; exit 1 }
-          # Sınırlar testin ürettiği gerçek sahne başlangıçlarından gelir (tahmin yok).
-          $result = Get-Content release/chatterbox-test-result.json -Raw | ConvertFrom-Json
-          # Son sahnenin geçişi yok (ondan sonra klip yok); sınırlar ondan önce biter.
-          $boundaries = $result.sceneBoundaries | Select-Object -SkipLast 1 | ConvertTo-Json -Compress -AsArray
-          if (-not $boundaries -or $boundaries -eq 'null') { Write-Error 'Sahne sınırları okunamadı.'; exit 1 }
-          node scripts/inspect-boundaries.mjs $mp4.FullName release/boundary-frames.json $boundaries
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $report = Get-Content release/boundary-frames.json -Raw | ConvertFrom-Json
-          if (-not $report.ok) { Write-Error "Kare sınırı denetimi başarısız: $($report.failures -join '; ')"; exit 1 }
+          # Bu test kendi MP4'ünü üretir ve sınırları kurgu verisinden türetir;
+          # başka bir adımın çıktısına bağımlı değildir, eksik dosya yüzünden atlanmaz.
+          $env:NEDENMIS_RENDER_DEBUG = '1'
+          npx vitest run tests/integration/boundaryInspection.test.ts 2>&1 | Tee-Object -FilePath release/boundary-inspection.log
+          $code = $LASTEXITCODE
+          if (Test-Path .verification/build20-parity/boundary-frames.json) {
+            Copy-Item .verification/build20-parity/boundary-frames.json release/boundary-frames.json -Force
+            $report = Get-Content release/boundary-frames.json -Raw | ConvertFrom-Json
+            Write-Host "Sınır denetimi: $($report.decodedFrames) kare, $($report.boundaries.Count) sınır, sonuç $($report.ok)"
+          }
+          exit $code
       - name: Test ve ses/video kanıtlarını paketle
         if: always()
         shell: pwsh
@@ -314,7 +314,8 @@ jobs:
           $assets = @(
             'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
             'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
-            'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass'
+            'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass',
+            'release/boundary-frames.json'
           )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }

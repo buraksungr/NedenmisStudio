@@ -16,10 +16,18 @@ const RUNTIME_FILES = {
   win32: 'cpython-3.11.11+20250317-x86_64-pc-windows-msvc-install_only_stripped.tar.gz',
   linux: 'cpython-3.11.11+20250317-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
 } as const;
-const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
+export const REQUIRED_MODEL_FILES = ['ve.pt', 't3_mtl23ls_v3.safetensors', 's3gen.pt', 'grapheme_mtl_merged_expanded_v1.json', 'conds.pt', 'Cangjie5_TC.json'];
 interface StoredState { dependenciesInstalled?: boolean; sourceRevision?: string; dependencyProfile?: string; modelDownloaded?: boolean; verifiedAt?: string; lastGenerationSeconds?: number; lastReferenceSha256?: string; pythonVersion?: string; torchVersion?: string; chatterboxVersion?: string; chatterboxSourceSha256?: string; chatterboxTokenizerSha256?: string }
 export interface ChatterboxGeneration { outputPath: string; duration: number; generationSeconds: number; modelLoadSeconds: number; referenceSha256: string; model: string; checkpoint: string; device: string; torch: string; sampleRate: number; channels: number; modelRevision: string; textPreprocessing: string; normalizedText: string; decodedText: string; tokenCount: number; tokenIds: number[]; languageTokenId: number; unknownTokens: number; seed: number }
 interface GenerationInput { id: string; text: string; referencePath: string; outputPath: string; exaggeration: number; cfgWeight: number; temperature: number; seed?: number; legacyLowercase?: boolean }
+
+/**
+ * bridge.py `status` olay satırını bulur. JSON ayırıcı boşluklarına bağımlı
+ * olmamak için desen eşleşmesi kullanılır (`json.dumps` sürüm/çağrı farkları).
+ */
+export function findStatusLine(output: string): string | undefined {
+  return output.split(/\r?\n/).filter((line) => /"event"\s*:\s*"status"/.test(line)).at(-1);
+}
 
 function friendlyProcessError(message: string): string {
   if (/403|429|rate limit/i.test(message)) return 'Model indirme sunucusu isteği sınırladı. Daha sonra yeniden deneyin; yarım indirilen dosyalar korunur.';
@@ -62,6 +70,30 @@ export class VoiceEngineManager {
     this.setupPromise = this.performSetup().catch((error) => { this.logger.error('Chatterbox kurulumu başarısız', error); throw new Error(friendlyProcessError(error instanceof Error ? error.message : String(error))); }).finally(() => { this.setupPromise = undefined; });
     return this.setupPromise;
   }
+  /**
+   * Kurulu bileşeni gerçek dosyalardan doğrular ve durumu yeniden kaydeder.
+   *
+   * Kurulum kaydı (ayar veritabanı) başka bir profil/çalışma tarafından
+   * yazılmış olabilir; "kayıt yok" demek "kurulu değil" demek DEĞİLDİR. Bu yüzden
+   * yönetilen Python çalıştırılıp paket kimliği ve V3 desteği yeniden ölçülür.
+   * Ağa çıkılmaz, model indirilmez: yalnızca yerel doğrulama yapılır.
+   */
+  async adoptInstalled(): Promise<VoiceEngineStatus> {
+    if (!existsSync(this.python())) throw new Error('Yönetilen Python bulunamadı; kurulum gerekli.');
+    const snapshot = this.snapshot();
+    if (!snapshot) throw new Error('Multilingual V3 model ağırlıkları bulunamadı; indirme gerekli.');
+    const output = await this.run(this.python(), [this.bridge(), 'status'], 'dependencies', { HF_HOME: this.modelsRoot, HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1' });
+    const statusLine = findStatusLine(output);
+    if (!statusLine) throw new Error('Kurulu Chatterbox kimliği okunamadı.');
+    const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean; v3_supported: boolean; watermarker_ready: boolean; mtl_tts_sha256?: string; tokenizer_sha256?: string; chatterbox?: string };
+    if (details.cuda) throw new Error('CPU-only kurulum beklenirken CUDA etkin PyTorch bulundu.');
+    if (!details.v3_supported) throw new Error('Kurulan Chatterbox paketi Multilingual V3 desteklemiyor.');
+    if (!details.mtl_tts_sha256 || !details.tokenizer_sha256) throw new Error('Kurulu paketin kaynak kimliği okunamadı.');
+    if (CHATTERBOX_EXPECTED_HASHES.mtlTts && details.mtl_tts_sha256 !== CHATTERBOX_EXPECTED_HASHES.mtlTts) throw new Error(`Kurulu Chatterbox kaynağı sabitlenen V3 commit ile eşleşmiyor (mtl_tts.py ${details.mtl_tts_sha256}).`);
+    if (CHATTERBOX_EXPECTED_HASHES.tokenizer && details.tokenizer_sha256 !== CHATTERBOX_EXPECTED_HASHES.tokenizer) throw new Error(`Kurulu Chatterbox tokenizer'ı sabitlenen V3 commit ile eşleşmiyor (${details.tokenizer_sha256}).`);
+    this.saveState({ dependenciesInstalled: true, sourceRevision: CHATTERBOX_SOURCE_REVISION, dependencyProfile: CHATTERBOX_DEPENDENCY_PROFILE, modelDownloaded: true, pythonVersion: details.python, torchVersion: details.torch, chatterboxVersion: details.chatterbox, chatterboxSourceSha256: details.mtl_tts_sha256, chatterboxTokenizerSha256: details.tokenizer_sha256 });
+    return this.status();
+  }
   private async performSetup(): Promise<VoiceEngineStatus> {
     await mkdir(this.root, { recursive: true });
     if (!existsSync(this.python())) await this.installRuntime();
@@ -97,7 +129,7 @@ export class VoiceEngineManager {
     this.progress('dependencies', 'Resmî Chatterbox Multilingual V3 kaynak kodu kuruluyor…');
     await this.run(this.python(), ['-m', 'pip', 'install', '--no-deps', '--force-reinstall', '--no-build-isolation', CHATTERBOX_SOURCE_URL], 'dependencies');
     const output = await this.run(this.python(), [this.bridge(), 'status'], 'dependencies');
-    const statusLine = output.split('\n').filter((line) => line.includes('"event": "status"')).at(-1);
+    const statusLine = findStatusLine(output);
     if (!statusLine) throw new Error('Chatterbox bağımlılıkları doğrulanamadı.');
     const details = JSON.parse(statusLine) as { python: string; torch: string; cuda: boolean; v3_supported: boolean; watermarker_ready: boolean; mtl_tts_sha256?: string; tokenizer_sha256?: string; chatterbox?: string };
     if (details.cuda) throw new Error('CPU-only kurulum beklenirken CUDA etkin PyTorch bulundu. Yönetilen bileşeni yeniden kurun.');
