@@ -10,8 +10,8 @@ describe('Altyazı zaman sınırları', () => {
     const sceneStart = 322 / 30; // 10.7333…
     const cues = generateSubtitleCues('Sıvı suda moleküller sürekli titreşir ve birbirinin yanından geçer.', 10.9667, sceneStart);
     expect(cues.length).toBeGreaterThan(0);
-    expect(cues[0].start).toBeGreaterThanOrEqual(Number(sceneStart.toFixed(3)));
-    for (const cue of cues) expect(cue.start).toBeGreaterThanOrEqual(Number(sceneStart.toFixed(3)) - 1e-9);
+    expect(cues[0].start).toBeGreaterThanOrEqual(sceneStart);
+    for (const cue of cues) expect(cue.start).toBeGreaterThanOrEqual(sceneStart);
   });
 
   it('her sahne için cue başlangıcı kendi sahne başlangıcına eşit veya sonrasındadır', () => {
@@ -19,9 +19,9 @@ describe('Altyazı zaman sınırları', () => {
     let cursor = 0;
     for (const duration of durations) {
       const cues = generateSubtitleCues('Buzun suda yüzmesinin nedeni yoğunluğunun sudan daha düşük olmasıdır. Su donarken kristal yapı oluşur.', duration, cursor);
-      expect(cues[0].start).toBeGreaterThanOrEqual(Number(cursor.toFixed(3)));
+      expect(cues[0].start).toBeGreaterThanOrEqual(cursor);
       // Cue zamanları 1 ms çözünürlükte tutulur; sınır ±10 ms toleransla doğrulanır.
-      expect(cues.at(-1)!.end).toBeLessThanOrEqual(cursor + duration + .01);
+      expect(cues.at(-1)!.end).toBeLessThanOrEqual(cursor + duration);
       cursor += duration;
     }
   });

@@ -43,15 +43,22 @@ export function generateSubtitleCues(text: string, duration: number, sceneStart 
   const phrases = splitPhrases(text);
   const weights = phrases.map((p) => Math.max(1, p.split(/\s+/).length + p.length / 45));
   const total = weights.reduce((a, b) => a + b, 0) || 1;
+  // Cue zamanları milisaniye çözünürlüğünde tutulur. Sahne başlangıcı kare
+  // ızgarasından geldiği için (ör. 322/30 = 10.7333…) yuvarlama yönü önemlidir:
+  // başlangıç YUKARI, bitiş AŞAĞI yuvarlanır; böylece bir cue asla kendi
+  // sahnesinin dışına taşmaz (Windows CI 43284052377 / 43295038243).
+  const toMillis = (value: number, mode: 'up' | 'down'): number =>
+    (mode === 'up' ? Math.ceil(value * 1000 - 1e-6) : Math.floor(value * 1000 + 1e-6)) / 1000;
+  const sceneStartMs = toMillis(sceneStart, 'up');
+  const sceneEndMs = toMillis(sceneStart + duration, 'down');
   let cursor = sceneStart;
   return phrases.map((phrase, index) => {
     const phraseDuration = duration * weights[index] / total;
+    const rawEnd = index === phrases.length - 1 ? sceneStart + duration : cursor + phraseDuration;
+    const startMs = Math.max(sceneStartMs, toMillis(cursor, 'up'));
+    const endMs = Math.max(startMs, Math.min(sceneEndMs, toMillis(rawEnd, 'down')));
     const cue: SubtitleCue = {
-      // Mutlak zamanlar 3 ondalığa yuvarlanır, ama sahne başlangıcından ÖNCE
-      // düşmemeli: 10.7333 → 10.733 yuvarlaması cue'yu sahnenin başından
-      // 0.33 ms öne taşıyordu (Windows CI 43284052377). İlk cue sahne başında başlar.
-      id: id('cue'), start: index === 0 ? Number(sceneStart.toFixed(3)) : Math.max(Number(sceneStart.toFixed(3)), Number(cursor.toFixed(3))), // Son cue sahne bitişini AŞMAZ (3 ondalık yuvarlama 8.4667 → 8.467 yapıyordu).
-      end: (() => { const raw = index === phrases.length - 1 ? sceneStart + duration : cursor + phraseDuration; return Math.min(Number(raw.toFixed(3)), Number((sceneStart + duration).toFixed(3))); })(),
+      id: id('cue'), start: startMs, end: endMs,
       text: phrase,
       emphasis: phrase.split(/\s+/).filter((word) => /^\d|!|\?/.test(word) || word.length > 11).slice(0, 1),
     };
