@@ -72,6 +72,10 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
       project.voice = { providerId: 'chatterbox-multilingual-v3', voiceId: 'reference-tr', speed: 1, pitch: 0, exaggeration: .5, cfgWeight: .5, temperature: .8 };
       context.projects.update(project);
 
+      // Yedi vakanın TAMAMI her zaman çalışır ve raporlanır. Tek bir vaka
+      // eşiği aşarsa diğerleri sessizce atlanmaz; hangi vakaların geçtiği
+      // raporun kendisinde görünür, sonuç sonda toplu doğrulanır.
+      const failures: string[] = [];
       for (const item of CASES) {
         const path = join(outputDirectory, `${item.id}.wav`);
         const preview = await context.tts.preview({ text: item.text, selection: project.voice, referenceVoicePath: imported.path });
@@ -84,28 +88,31 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
         const characteristics = await execFileAsync(context.ffmpeg.ffmpegPath, ['-hide_banner', '-i', path, '-af', 'volumedetect', '-f', 'null', '-']);
         const mean = /mean_volume: (-?[\d.]+) dB/.exec(characteristics.stderr)?.[1];
         expect(Number(mean), `${item.id} ortalama ses düzeyi`).toBeGreaterThan(-40);
-        expect(preview.engine?.checkpoint).toBe('t3_mtl23ls_v3.safetensors');
-        expect(preview.engine?.textPreprocessing).toBe('NFKD,fullcase');
-        expect(preview.engine?.unknownTokens).toBe(0);
-        expect(preview.engine?.decodedText).toContain('[tr]');
+        // Motor kimliği her vakada doğrulanır: sessiz motor değişimi kabul edilmez.
+        expect(preview.engine?.checkpoint, `${item.id} kontrol noktası`).toBe('t3_mtl23ls_v3.safetensors');
+        expect(preview.engine?.textPreprocessing, `${item.id} ön işleme`).toBe('NFKD,fullcase');
+        expect(preview.engine?.unknownTokens, `${item.id} bilinmeyen token`).toBe(0);
+        expect(preview.engine?.decodedText, `${item.id} dil koşullaması`).toContain('[tr]');
         const asrPath = join(outputDirectory, `${item.id}-asr.json`);
         const asrPython = process.env.NEDENMIS_ASR_PYTHON || process.env.NEDENMIS_VOICE_PYTHON || 'python';
         const { stdout } = await execFileAsync(asrPython, ['scripts/turkish_asr_eval.py', '--audio', path, '--text', item.text, '--case', item.id, '--output', asrPath]);
-        const asr = JSON.parse(stdout.trim().split('\n').at(-1)!) as { status: string; cer?: number; wer?: number };
-        report.push({ id: item.id, text: item.text, audio: path, duration: probe.duration, meanDb: Number(mean), checkpoint: preview.engine?.checkpoint, asrStatus: asr.status, cer: asr.cer, wer: asr.wer, asrReport: asrPath });
-        // ASR yoksa bu bir "başarı" değildir; sessizce geçilmez.
-        expect(asr.status, `${item.id} ASR değerlendirmesi yapılamadı`).toBe('evaluated');
-        expect(asr.cer!, `${item.id} CER`).toBeLessThanOrEqual(.35);
+        const asr = JSON.parse(stdout.trim().split('\n').at(-1)!) as { status: string; cer?: number; wer?: number; transcript?: string };
+        const passed = asr.status === 'evaluated' && Number(asr.cer) <= .35;
+        if (!passed) failures.push(`${item.id}: CER ${asr.cer} (durum ${asr.status})`);
+        report.push({ id: item.id, text: item.text, audio: path, duration: probe.duration, meanDb: Number(mean), checkpoint: preview.engine?.checkpoint, textPreprocessing: preview.engine?.textPreprocessing, unknownTokens: preview.engine?.unknownTokens, languageToken: String(preview.engine?.decodedText || '').includes('[tr]'), asrStatus: asr.status, cer: asr.cer, wer: asr.wer, passed, transcript: asr.transcript, asrReport: asrPath });
       }
       const output = join(process.cwd(), '.verification', 'build20-tts', 'turkish-tts-asr.json');
       await mkdir(join(process.cwd(), '.verification', 'build20-tts'), { recursive: true });
-      const payload = { ok: report.every((item) => (item.asrStatus as string) === 'evaluated' && Number(item.cer) <= .35), cases: report, model: 'Chatterbox Multilingual V3', checkpoint: 't3_mtl23ls_v3.safetensors', humanListeningPerformed: false, note: 'ASR yalnızca anlaşılırlık kanıtıdır; insan dinlemesi yapılmadı.' };
+      const payload = { ok: failures.length === 0, failureSummary: failures, cases: report, model: 'Chatterbox Multilingual V3', checkpoint: 't3_mtl23ls_v3.safetensors', humanListeningPerformed: false, note: 'ASR yalnızca anlaşılırlık kanıtıdır; insan dinlemesi yapılmadı.' };
       await writeFile(output, JSON.stringify(payload, null, 2), 'utf8');
       // Rapor WAV'ların yanına da yazılır: kanıt klasörü artefakt olarak yüklendiği için
       // yedi vakanın tek tek sonucu yayımlanmış kanıtta görünür olur.
       await writeFile(join(outputDirectory, 'turkish-tts-asr.json'), JSON.stringify(payload, null, 2), 'utf8');
       const published = process.env.NEDENMIS_TURKISH_TTS_REPORT;
       if (published) { await mkdir(dirname(published), { recursive: true }); await writeFile(published, JSON.stringify(payload, null, 2), 'utf8'); }
+      // Rapor yazıldıktan SONRA toplu sonuç doğrulanır; yedi vakanın hepsi raporludur.
+      expect(report, 'yedi vakanın tamamı değerlendirildi').toHaveLength(CASES.length);
+      expect(failures, `eşiği aşan vakalar: ${failures.join('; ')}`).toEqual([]);
       retainVerificationArtifacts(outputDirectory, 'build20-tts/audio', true);
     } finally { context.voiceEngine.close(); context.database.close(); }
   }, 3_600_000);

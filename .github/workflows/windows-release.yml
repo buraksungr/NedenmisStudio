@@ -56,6 +56,7 @@ jobs:
           Invoke-Step 'lint' 'npm run lint'
           Invoke-Step 'python' 'python -m unittest discover -s voice-engine -p "test_*.py"'
           Invoke-Step 'drive-upload-test' 'python -m unittest scripts/test_drive_upload_release.py'
+          Invoke-Step 'asr-eval-test' 'python -m unittest scripts/test_turkish_asr_eval.py'
           Invoke-Step 'vitest' 'npm run test'
       - name: Üretim derlemesi
         run: npm run build

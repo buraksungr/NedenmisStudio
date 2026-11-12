@@ -30,10 +30,71 @@ CASES = [
 
 # ASR'de okunuş farkı yaratan ama anlamı bozmayan ekleri karşılaştırmak için
 # Türkçe'ye duyarlı sadeleştirme: aksan/NFKD farkları ve noktalama yok sayılır.
+# Türkçe sayı sözcükleri. Metin sayıları YAZIYLA içerirken ASR bunları RAKAMLA
+# yazar ("yüzde on dört virgül beş" → "yüzde 14 5"). Bu fark telaffuz hatası
+# değildir; normalizasyon iki gösterimi aynı biçime getirir.
+NUMBER_WORDS = {
+    "sıfır": 0, "bir": 1, "iki": 2, "üç": 3, "dört": 4, "beş": 5, "altı": 6, "yedi": 7,
+    "sekiz": 8, "dokuz": 9, "on": 10, "yirmi": 20, "otuz": 30, "kırk": 40, "elli": 50,
+    "altmış": 60, "yetmiş": 70, "seksen": 80, "doksan": 90, "yüz": 100, "bin": 1000,
+    "milyon": 1000000,
+}
+SCALE_WORDS = {"bin": 1000, "milyon": 1000000}
+
+
+def digits_from_number_words(tokens: list[str]) -> list[str]:
+    """Ardışık Türkçe sayı sözcüklerini tek bir sayıya indirger.
+
+    Türkçe kural: "yedi yüz seksen üç bin beş yüz altmış iki" = 783562.
+    "yüz"/"bin"/"milyon" çarpan, diğerleri toplanan değerlerdir.
+    """
+    output: list[str] = []
+    total = 0      # ölçekle çarpılıp toplanmış kısım
+    current = 0    # henüz ölçeklenmemiş kısım
+    active = False
+    pending_hundred = False  # "yüz" tek başına 100'dür, sayıdan önce 100× yapar
+
+    def flush() -> None:
+        nonlocal total, current, active, pending_hundred
+        if active or pending_hundred:
+            output.append(str(total + current + (100 if pending_hundred else 0)))
+        total = 0
+        current = 0
+        active = False
+        pending_hundred = False
+
+    for token in tokens:
+        if token == "yüz":
+            # "üç yüz" → 300, tek başına "yüz" → 100
+            current = (current or 1) * 100
+            active = True
+            continue
+        if token in SCALE_WORDS:
+            total += (current or 1) * SCALE_WORDS[token]
+            current = 0
+            active = True
+            continue
+        value = NUMBER_WORDS.get(token)
+        if value is not None and value < 100:
+            current += value
+            active = True
+            continue
+        flush()
+        output.append(token)
+    flush()
+    return output
+
+
 def normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text).casefold().replace("i\u0307", "i")
-    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
-    return " ".join(text.split())
+    # "virgül" ondalık ayırıcıdır; rakam gösteriminde "." olur.
+    text = re.sub(r"\bvirgül\b", " . ", text)
+    text = re.sub(r"[^\w\s.]", " ", text, flags=re.UNICODE)
+    tokens = digits_from_number_words(text.split())
+    # "14 . 5" → "14.5" (ondalık sayı tek parça).
+    joined = " ".join(tokens)
+    joined = re.sub(r"(\d) \. (\d)", r"\1.\2", joined)
+    return " ".join(joined.split())
 
 
 def edit_distance(reference: list[str], hypothesis: list[str]) -> int:
@@ -82,7 +143,9 @@ def main() -> int:
     report["note"] = "ASR yalnızca anlaşılırlığı ölçer; doğal prozodi, vurgu ve konuşmacı benzerliği dinlenmeden doğrulanmış sayılmaz."
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"status": report["status"], "cer": report["scores"]["cer"], "wer": report["scores"]["wer"]}, ensure_ascii=False))
+    print(json.dumps({"status": report["status"], "cer": report["scores"]["cer"], "wer": report["scores"]["wer"],
+                      "transcript": report.get("transcript"), "expectedText": args.text,
+                      "normalizedReference": normalize(args.text), "normalizedTranscript": normalize(str(report.get("transcript") or ""))}, ensure_ascii=False))
     return 0
 
 
