@@ -45,7 +45,11 @@ export class TtsService {
         // üretilebiliyordu → Windows'ta "785/786 kare" hatası (CI 43267875513).
         // Kare ızgarasına yukarı yuvarlamak hem anlatımın kesilmemesini hem de
         // toplam kare sayısının tam sayı olmasını garanti eder.
-        scene.duration = Math.max(1, Math.ceil((result.duration + .22) * FRAME_RATE) / FRAME_RATE);
+        // Ölçülen anlatım süresi milisaniyeye yuvarlanmış olabilir; kare ızgarasına
+        // yukarı yuvarlarken bu yuvarlama payı (1 ms) eklenir ki sahne hiçbir zaman
+        // anlatımdan kısa kalmasın (10.733 s anlatım → 10.733 s sahne hatası).
+        const measuredNarration = result.duration + .22 + .001;
+        scene.duration = Math.max(1, Math.ceil(measuredNarration * FRAME_RATE) / FRAME_RATE);
         scene.subtitleTiming = result.timingMode; (scene as typeof scene & { alignedCues?: unknown }).alignedCues = result.cues;
         const info = await stat(path); this.media.upsertByPath({ kind: 'narration', name: `${project.name} · Sahne ${scene.number}`, path, mimeType: mimeFor(provider.id), size: info.size, duration: result.duration, projectId: project.id });
         this.projects.update(project);

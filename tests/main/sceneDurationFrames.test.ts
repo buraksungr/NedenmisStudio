@@ -36,6 +36,17 @@ describe('Sahne süreleri kare ızgarasında', () => {
     expect(timeline.duration * FRAME_RATE).toBeCloseTo(786, 6);
   });
 
+  it('kare yukarı yuvarlaması sahneyi asla anlatımdan kısa bırakmaz', () => {
+    // Regresyon (CI 43278664293): 10.733 s anlatım → 10.733 s sahne.
+    // Ölçülen süre ms'ye yuvarlı olduğu için yuvarlama payı eklenir.
+    for (const narration of [10.733, 8.457, 9.237, 6.111, 11.999, 4.005]) {
+      const duration = Math.ceil((narration + .22 + .001) * FRAME_RATE) / FRAME_RATE;
+      expect(duration, `${narration} s anlatım`).toBeGreaterThanOrEqual(narration);
+      const frames = duration * FRAME_RATE;
+      expect(Math.abs(frames - Math.round(frames)), `${narration} s kare ızgarası`).toBeLessThan(1e-6);
+    }
+  });
+
   it('kareye oturtma anlatım süresini kısaltmaz (yukarı yuvarlama korunur)', () => {
     const narration = 8.237; const padded = Math.ceil((narration + .22) * FRAME_RATE) / FRAME_RATE;
     expect(padded).toBeGreaterThanOrEqual(narration + .22 - 1e-9);
