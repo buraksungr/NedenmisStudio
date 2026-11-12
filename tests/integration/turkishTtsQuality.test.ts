@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { retainVerificationArtifacts } from '../helpers.js';
@@ -99,7 +99,13 @@ describe.skipIf(!enabled)('Gerçek Chatterbox V3 Türkçe üretimi ve ASR değer
       }
       const output = join(process.cwd(), '.verification', 'build20-tts', 'turkish-tts-asr.json');
       await mkdir(join(process.cwd(), '.verification', 'build20-tts'), { recursive: true });
-      await writeFile(output, JSON.stringify({ cases: report, model: 'Chatterbox Multilingual V3', checkpoint: 't3_mtl23ls_v3.safetensors', humanListeningPerformed: false, note: 'ASR yalnızca anlaşılırlık kanıtıdır; insan dinlemesi yapılmadı.' }, null, 2), 'utf8');
+      const payload = { ok: report.every((item) => (item.asrStatus as string) === 'evaluated' && Number(item.cer) <= .35), cases: report, model: 'Chatterbox Multilingual V3', checkpoint: 't3_mtl23ls_v3.safetensors', humanListeningPerformed: false, note: 'ASR yalnızca anlaşılırlık kanıtıdır; insan dinlemesi yapılmadı.' };
+      await writeFile(output, JSON.stringify(payload, null, 2), 'utf8');
+      // Rapor WAV'ların yanına da yazılır: kanıt klasörü artefakt olarak yüklendiği için
+      // yedi vakanın tek tek sonucu yayımlanmış kanıtta görünür olur.
+      await writeFile(join(outputDirectory, 'turkish-tts-asr.json'), JSON.stringify(payload, null, 2), 'utf8');
+      const published = process.env.NEDENMIS_TURKISH_TTS_REPORT;
+      if (published) { await mkdir(dirname(published), { recursive: true }); await writeFile(published, JSON.stringify(payload, null, 2), 'utf8'); }
       retainVerificationArtifacts(outputDirectory, 'build20-tts/audio', true);
     } finally { context.voiceEngine.close(); context.database.close(); }
   }, 3_600_000);

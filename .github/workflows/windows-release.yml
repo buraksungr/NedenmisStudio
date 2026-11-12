@@ -116,6 +116,7 @@ jobs:
           NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
           NEDENMIS_CHATTERBOX_TURKISH_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\turkish-reference.flac
           NEDENMIS_VOICE_PYTHON: ${{ runner.temp }}\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe
+          NEDENMIS_TURKISH_TTS_REPORT: ${{ github.workspace }}\release\turkish-tts-asr.json
         shell: pwsh
         run: |
           # ASR yalnızca yönetilen Python'a kurulur; test de aynı yorumlayıcıyı kullanır.
@@ -269,6 +270,24 @@ jobs:
             Write-Host "Sınır denetimi: $($report.decodedFrames) kare, $($report.boundaries.Count) sınır, sonuç $($report.ok)"
           }
           exit $code
+      - name: Yedi Türkçe V3 vakasını PR raporuna yaz
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if (-not (Test-Path release/turkish-tts-asr.json)) { Write-Host 'Yedi vaka raporu yok.'; exit 0 }
+          $report = Get-Content release/turkish-tts-asr.json -Raw | ConvertFrom-Json
+          $lines = @('## Gerçek Chatterbox V3 Türkçe üretimi — yedi vaka', '', "Çalışma: $($env:GITHUB_RUN_ID) · Sonuç: **$($report.ok)** · Kontrol noktası: $($report.checkpoint)", '', '| Vaka | Durum | CER | WER | Süre (sn) | Ortalama dB | WAV |', '|---|---|---:|---:|---:|---:|---|')
+          foreach ($case in $report.cases) {
+            $lines += "| $($case.id) | $($case.asrStatus) | $('{0:F4}' -f [double]$case.cer) | $('{0:F4}' -f [double]$case.wer) | $('{0:F2}' -f [double]$case.duration) | $('{0:F1}' -f [double]$case.meanDb) | ``$($case.audio)`` |"
+          }
+          $lines += '', '**İnsan dinlemesi yapılmadı.** ASR yalnızca anlaşılırlık kanıtıdır; doğal prozodi veya konuşmacı benzerliği kanıtı değildir.'
+          [IO.File]::WriteAllText("$PWD/release/turkish-tts-summary.md", ($lines -join "`n"))
+          $number = $env:PR_NUMBER
+          if (-not $number) { $number = gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' 2>$null }
+          if ($number) { gh pr comment $number --body-file release/turkish-tts-summary.md }
       - name: Test ve ses/video kanıtlarını paketle
         if: always()
         shell: pwsh
@@ -315,7 +334,7 @@ jobs:
             'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
             'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
             'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass',
-            'release/boundary-frames.json'
+            'release/boundary-frames.json', 'release/turkish-tts-asr.json'
           )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }
