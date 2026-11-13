@@ -47,3 +47,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes pulse-soft { 50% { opacity: .5; } }
 .pulse-soft { animation: pulse-soft 1.8s ease-in-out infinite; }
+
+/*
+ * Sahne SVG'si 1080×1920 tasarım uzayında üretilir (viewBox="0 0 1080 1920") ve
+ * `AnimatedScene` içine satır içi basılır. Tailwind preflight `img, video` için
+ * `max-width:100%` verir ama `svg` için vermez; bu yüzden SVG kendi 1080×1920
+ * nitelik boyutunda kalıp önizleme kutusunu taşırıyor ve kırpıyordu.
+ * Burada SVG kapsayıcısına `contain` ile sığdırılır: en-boy oranı korunur, hiçbir
+ * kenar kırpılmaz ve kompozisyon dışa aktarılan 1080×1920 kareyle birebir aynıdır.
+ */
+.scene-fit > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}

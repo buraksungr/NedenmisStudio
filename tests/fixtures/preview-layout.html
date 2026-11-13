@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><title>Önizleme yerleşimi</title>
+<style>
+  /* Tailwind preflight'in ilgili kısmı (SVG'yi kasıtlı olarak kapsamaz). */
+  img, svg, video, canvas { display: block; vertical-align: middle; }
+  img, video { max-width: 100%; height: auto; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f0c; font-family: Inter, Arial, sans-serif; }
+  /* Editor.tsx:61 — önizleme kutusu: 9/16 en-boy oranı, taşan içerik kırpılır. */
+  .preview-area { display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 8px; }
+  .preview-box { position: relative; height: 100%; max-height: 100%; overflow: hidden; border-radius: 8px; background: #0a0e0b; aspect-ratio: 9/16; }
+  .stage { position: absolute; inset: 0; overflow: hidden; }
+  .animated { position: absolute; inset: 0; height: 100%; width: 100%; overflow: hidden; }
+  /* src/renderer/styles.css içindeki düzeltme. */
+  .scene-fit > svg { display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+</style></head>
+<body>
+  <div class="preview-area" id="area" style="width: 900px; height: 700px;">
+    <div class="preview-box" id="box">
+      <div class="stage" id="stage">
+        <div class="animated scene-fit" id="scene-host"></div>
+      </div>
+    </div>
+  </div>
+</body></html>

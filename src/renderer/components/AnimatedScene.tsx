@@ -51,8 +51,16 @@ export function AnimatedScene({ project, scene, identity, time, playing, timelin
   const sourceTime = drivesItself && selfTime !== undefined ? selfTime : time;
   const frameTime = Math.floor(Math.max(0, Math.min(scene.duration, sourceTime)) * 30) / 30;
   const svg = useMemo(() => renderAnimatedSceneSvg(project, scene, { ...DEFAULT_IDENTITY, ...identity }, frameTime), [project, scene, identity, frameTime]);
+  // SVG `width`/`height` NİTELİKLERİ 1080×1920'dir; Tailwind preflight ise
+  // yalnızca `img, video` için `max-width:100%` verir, `svg` için VERMEZ. Bu yüzden
+  // satır içi SVG kendi 1080×1920 boyutunda kalıp önizleme kutusunu taşırıyor ve
+  // kırpılıyordu. Ölçüm (gerçek Chromium, 1440×900): kutu 384,75×684 px, SVG
+  // 1080×1920 px → kompozisyonun yalnızca %12,69'u görünüyordu.
+  // Çözüm: SVG kapsayıcısına sığdırılır (contain). `viewBox` 0 0 1080 1920
+  // olduğu için koordinat uzayı ve kompozisyon dışa aktarımla AYNI kalır;
+  // değişen tek şey görüntüleme ölçeğidir.
   return <div
-    className={`absolute inset-0 h-full w-full overflow-hidden ${className}`}
+    className={`scene-fit absolute inset-0 h-full w-full overflow-hidden ${className}`}
     data-testid={testId}
     data-animation-preset={settings.preset}
     data-frame-time={frameTime.toFixed(3)}

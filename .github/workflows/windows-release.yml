@@ -255,6 +255,24 @@ jobs:
             if ($number) { gh pr comment $number --body-file release/failure-summary.md }
             else { Write-Host 'PR bulunamadı; özet yalnızca artefaktta.' }
           }
+      - name: 9:16 önizleme görsel regresyon testi
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          # Gerçek Chromium'da ölçer: uzun Türkçe başlık, dört kenara yakın öğe,
+          # alta yakın illüstrasyon ve alt altyazı dört farklı pencere boyutunda.
+          # Chromium yoksa test atlanmaz; açık hatayla durur.
+          npx playwright install chromium 2>&1 | Tee-Object -FilePath release/preview-regression.log
+          npx vite-node scripts/preview-regression.mjs 2>&1 | Tee-Object -FilePath release/preview-regression.log -Append
+          $code = $LASTEXITCODE
+          if (Test-Path .verification/build40/preview-regression.json) {
+            Copy-Item .verification/build40/preview-regression.json release/preview-regression.json -Force
+            if (Test-Path .verification/build40/previews) { Copy-Item .verification/build40/previews release/preview-shots -Recurse -Force }
+            $report = Get-Content release/preview-regression.json -Raw | ConvertFrom-Json
+            Write-Host "Önizleme: kompozisyon görünürlüğü $($report.viewports[0].visibleFraction), başlık satırları: $($report.titleWrapped -join ' / '), sonuç $($report.ok)"
+          }
+          exit $code
       - name: Kare düzeyinde geçiş sınırı denetimi
         if: always()
         shell: pwsh
@@ -335,7 +353,7 @@ jobs:
             'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
             'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
             'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass',
-            'release/boundary-frames.json', 'release/turkish-tts-asr.json'
+            'release/boundary-frames.json', 'release/preview-regression.json', 'release/turkish-tts-asr.json'
           )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }
@@ -379,7 +397,7 @@ jobs:
               'ZIP’ten bağımsız aç, kopya SQLite, Rayleigh önizleme ve MP4 doğrula',
               'Windows x64 NSIS kurucusu', 'Kur, terminalsiz aç ve SQLite doğrula',
               'Kurulu uygulama WAV/MP4 kanıtlarını topla', 'Kurulum boyutları ve SHA-256 manifesti',
-              'Test ve ses/video kanıtlarını paketle',
+              'Test ve ses/video kanıtlarını paketle', '9:16 önizleme görsel regresyon testi',
           ]
           for name in required:
               assert any(step['name'] == name and step['conclusion'] == 'success' for step in steps), f'Zorunlu test adayı başarısız/eksik: {name}'
