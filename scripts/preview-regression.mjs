@@ -15,6 +15,7 @@ import { DEFAULT_IDENTITY } from '../shared/defaults.ts';
 
 const require = createRequire(import.meta.url);
 const { chromium: playwrightChromium } = require('playwright');
+const sharp = require('sharp');
 
 /**
  * Tarayıcı çözümlemesi platforma göre:
@@ -70,6 +71,7 @@ const browser = await playwrightChromium.launch({
 });
 
 const results = [];
+let parity = { compared: false };
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   for (const viewport of VIEWPORTS) {
@@ -127,12 +129,66 @@ try {
     mkdirSync('.verification/build40/previews', { recursive: true });
     await page.locator('#box').screenshot({ path: join('.verification/build40/previews', `${viewport.name}.png`) });
   }
+
+// --- Önizleme ↔ dışa aktarım eşitliği ----------------------------------------
+// Dışa aktarım (RenderService) SVG'yi sharp ile 1080×1920'ye rasterize eder
+// (`fit: 'fill'`, bozulma yok). Önizleme ise AYNI SVG'yi DOM'da gösterir.
+// İki bağımsız rasterleştirici (sharp/libvsvg ve Chromium) aynı kadrajı
+// veriyorsa, önizleme ile dışa aktarım aynı kompozisyonu taşır.
+//
+// Karşılaştırma pikselli değil, hücre ortalaması üzerinden yapılır: iki
+// rasterleştirici metin kenarlarını farklı antialias ile çizer, ama kompozisyon
+// (hangi öğe nerede) aynıysa hücre ortalamaları örtüşür.
+async function gridOf(png, columns, rows) {
+  const { data } = await sharp(png).resize(columns, rows, { fit: 'fill' }).greyscale().raw().toBuffer({ resolveWithObject: true });
+  return data;
+}
+function compareGrids(a, b) {
+  let sum = 0; let max = 0;
+  for (let i = 0; i < a.length; i += 1) { const d = Math.abs(a[i] - b[i]); sum += d; if (d > max) max = d; }
+  const meanAbsDiff = sum / a.length;
+  // Yapısal benzerlik: 1 - ortalama fark / 255.
+  return { meanAbsDiff: +meanAbsDiff.toFixed(2), maxAbsDiff: max, similarity: +(1 - meanAbsDiff / 255).toFixed(4) };
+}
+
+try {
+  // Dışa aktarımın gerçek rasterizasyonu (RenderService ile birebir aynı yol).
+  const exportRaster = await sharp(Buffer.from(SCENE_SVG), { density: 72 })
+    .resize(COMPOSITION.width, COMPOSITION.height, { fit: 'fill' }).png().toBuffer();
+  // Önizleme rasterizasyonu: aynı SVG, Chromium DOM'unda, doğal 1080×1920.
+  const nativePage = await browser.newPage({ viewport: { width: COMPOSITION.width, height: COMPOSITION.height }, deviceScaleFactor: 1 });
+  await nativePage.setContent(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#0b0f0c;width:${COMPOSITION.width}px;height:${COMPOSITION.height}px;overflow:hidden}svg{display:block}</style></head><body>${SCENE_SVG}</body></html>`);
+  const previewRaster = await nativePage.screenshot({ type: 'png' });
+  await nativePage.close();
+  mkdirSync('.verification/build40/previews', { recursive: true });
+  await sharp(exportRaster).toFile('.verification/build40/previews/export-raster-sharp.png');
+  await sharp(previewRaster).toFile('.verification/build40/previews/preview-raster-chromium.png');
+
+  const COLUMNS = 54; const ROWS = 96;
+  const exportGrid = await gridOf(exportRaster, COLUMNS, ROWS);
+  const previewGrid = await gridOf(previewRaster, COLUMNS, ROWS);
+  const pair = compareGrids(exportGrid, previewGrid);
+
+  parity = {
+    compared: true,
+    method: 'sharp/libvsvg (dışa aktarım rasterizasyonu) ↔ Chromium DOM (önizleme rasterizasyonu), 54×96 hücre ortalama parlaklık',
+    exportVsPreview: pair,
+    // Gerçek MP4 karesi ↔ aynı SVG karşılaştırması ayrı testte yapılır
+    // (tests/integration/exportedMp4Composition.test.ts): o testin sahnesi
+    // buradaki test sahnesinden farklı olduğu için burada karşılaştırılmaz.
+  };
+  if (pair.similarity < 0.95) throw new Error(`önizleme ve dışa aktarım farklı kompozisyon gösteriyor (benzerlik ${pair.similarity})`);
+} catch (error) {
+  parity.error = String(error && error.message ? error.message : error);
+  results.push({ viewport: { name: 'parity' }, failures: [`önizleme/dışa aktarım eşitliği doğrulanamadı: ${parity.error}`] });
+}
 } finally {
   await browser.close();
 }
 
 const report = {
   ok: results.every((item) => item.failures.length === 0),
+  parity,
   scenario: 'Uzun Türkçe başlık, dört kenara yakın öğe, alta yakın büyük illüstrasyon, alt altyazı',
   composition: COMPOSITION,
   titleWrapped: wrapTitle(project.topic),

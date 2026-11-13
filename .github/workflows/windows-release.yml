@@ -269,6 +269,7 @@ jobs:
           if (Test-Path .verification/build40/preview-regression.json) {
             Copy-Item .verification/build40/preview-regression.json release/preview-regression.json -Force
             if (Test-Path .verification/build40/previews) { Copy-Item .verification/build40/previews release/preview-shots -Recurse -Force }
+            if (Test-Path .verification/build40/export) { Copy-Item .verification/build40/export release/preview-export -Recurse -Force }
             $report = Get-Content release/preview-regression.json -Raw | ConvertFrom-Json
             Write-Host "Önizleme: kompozisyon görünürlüğü $($report.viewports[0].visibleFraction), başlık satırları: $($report.titleWrapped -join ' / '), sonuç $($report.ok)"
           }
@@ -325,6 +326,7 @@ jobs:
             release/*.wav
             release/previews/**
             release/preview-shots/**
+            release/preview-export/**
             release/exports/**
             release/Kurulu-Uygulama-Testi/**
             release/Portable-Uygulama-Testi/**
@@ -354,7 +356,7 @@ jobs:
             'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
             'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
             'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass',
-            'release/boundary-frames.json', 'release/preview-regression.json', 'release/turkish-tts-asr.json'
+            'release/boundary-frames.json', 'release/preview-regression.json', 'release/preview-export/mp4-svg-parity.json', 'release/turkish-tts-asr.json'
           )
           $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
           $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }
