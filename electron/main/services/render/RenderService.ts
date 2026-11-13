@@ -213,7 +213,13 @@ export class RenderService {
             const kind = exportTransitionKind(scene.transition);
             filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${crossfade}:offset=${frameExactSeconds(starts[index])}${output}`);
           }
-          args.push('-filter_complex', filters.join(';'), '-map', `[vx${segments.length - 1}]`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-frames:v', String(timelineFrames), visualPath);
+          // `-frames:v` bir ÜST sınırdır: birleştirme kısa kalırsa son kareler
+          // üretilmez. Bu yüzden zincirin sonuna sınırlı bir `tpad` (son kareyi
+          // klonla) eklenir. Yalnızca eksik kuyruğu doldurur; var olan kareleri
+          // değiştirmez, siyah kare üretmez ve zaman çizelgesi uzunluğunu aşmaz.
+          const lastLabel = `[vx${segments.length - 1}]`;
+          filters.push(`${lastLabel}tpad=stop_mode=clone:stop_duration=${(2 / FRAME_RATE).toFixed(6)}[vpad]`);
+          args.push('-filter_complex', filters.join(';'), '-map', '[vpad]', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-frames:v', String(timelineFrames), visualPath);
           await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / duration * 10), 'Sahne geçişleri işleniyor') });
         }
       }
@@ -221,6 +227,8 @@ export class RenderService {
       const visualProbe = await this.ffmpeg.probe(visualPath);
       const visualFrames = await this.ffmpeg.countFrames(visualPath);
       this.logger.info(`Geçiş sonrası video: ${visualFrames} kare, ${visualProbe.duration}s (beklenen ${timelineFrames} kare, ${duration}s)`);
+      // Doğrulama GEVŞETİLMEZ: tam kare sayısı zorunludur. `tpad` sonrası hâlâ
+      // eksik varsa bu gerçek bir hata olarak kalır ve dışa aktarım tamamlanmaz.
       if (visualFrames !== timelineFrames) throw new Error(`Geçiş birleştirmesi kare kaybetti: ${visualFrames} / ${timelineFrames}.`);
       this.report(record, 68, 'Ses kanalları miksajlanıyor'); const audioPath = join(work, 'mix.m4a');
       await this.audio.mix(`${exportId}-audio`, { narration: project.scenes.filter((scene) => scene.narrationPath).map((scene) => ({ path: scene.narrationPath!, start: starts[project.scenes.indexOf(scene)], volume: project.audio.narrationVolume })), music: project.audio.musicClips, sfx: project.audio.sfxClips, musicVolume: project.audio.musicVolume, sfxVolume: project.audio.sfxVolume, duration, ducking: project.audio.musicDucking }, audioPath);
