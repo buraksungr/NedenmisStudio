@@ -1,0 +1,21 @@
+{
+  "persistentProjectsReopened": 1,
+  "installer": "D:\\a\\NedenmisStudio\\NedenmisStudio\\release\\NedenmisStudio-Setup.exe",
+  "installedVoice": {
+    "providerId": "chatterbox-multilingual-v3",
+    "checkpoint": "t3_mtl23ls_v3.safetensors",
+    "device": "cpu",
+    "referenceSha256": "f22a1080dc9b32b03f10fe079461d10d9a6471e4874b86209fc1907525f3d9d3",
+    "generationSeconds": 121.904,
+    "duration": 8.24,
+    "audioPath": "D:\\a\\_temp\\nedenmis-chatterbox\\storage\\previews\\ses-onizleme-1794058037962.wav"
+  },
+  "sqliteCreated": true,
+  "ffmpeg": "ffmpeg version 6.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2023 the FFmpeg developers\r",
+  "testedAt": "2026-11-07T13:30:15.7735394Z",
+  "launchWithoutTerminal": true,
+  "ok": true,
+  "voiceBridge": true,
+  "userData": "D:\\a\\_temp\\nedenmis-chatterbox",
+  "installedExecutable": "C:\\Users\\runneradmin\\AppData\\Local\\Programs\\NedenmisStudio\\NedenmisStudio.exe"
+}
