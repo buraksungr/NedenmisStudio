@@ -1,0 +1,25 @@
+{
+  "ok": true,
+  "model": "Chatterbox Multilingual V3",
+  "checkpoint": "t3_mtl23ls_v3.safetensors",
+  "device": "cpu",
+  "referenceSha256": "f22a1080dc9b32b03f10fe079461d10d9a6471e4874b86209fc1907525f3d9d3",
+  "previewSeconds": 7.92,
+  "previewGenerationSeconds": 146.277,
+  "projectNarrationSeconds": [9.04, 10.52],
+  "mp4": "D:\\a\\_temp\\nedenmis-chatterbox\\storage\\exports\\Gerçek Chatterbox sınaması-2026-11-07T13-21-00.mp4",
+  "video": {
+    "duration": 20,
+    "width": 1080,
+    "height": 1920,
+    "codec": "h264"
+  },
+  "persistenceAfterRestart": true,
+  "hardware": {
+    "cpu": "AMD EPYC 7763 64-Core Processor",
+    "logicalCores": 2,
+    "totalMemoryGB": 8,
+    "freeMemoryAtEndGB": 3.1
+  },
+  "note": "Gerçek referans kullanımı ve dosya üretimi doğrulandı; konuşmacı benzerliği otomatik ölçülmedi, örnek dinlenmelidir."
+}

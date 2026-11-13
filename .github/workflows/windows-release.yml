@@ -1,0 +1,541 @@
+name: Windows EXE ve gerçek Chatterbox doğrulaması
+on:
+  workflow_dispatch:
+    inputs:
+      drive_upload_only:
+        description: 'Testleri geçen run’ın artefaktlarından eksik Release’i tamamla ve Drive’a yükle'
+        required: false
+        default: false
+        type: boolean
+      source_run_id:
+        description: 'Başarıyla tamamlanmış Windows production run ID'
+        required: false
+        type: string
+      drive_upload_sessions:
+        description: 'Özel repo için tek kullanımlık Drive oturum JSON’u; loglanmaz'
+        required: false
+        type: string
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  windows-production:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.drive_upload_only }}
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+          cache: npm
+      - name: Bağımlılıklar
+        run: npm ci
+      - name: Electron runtime doğrulaması
+        run: node scripts/ensure-electron.mjs
+      - name: Statik kontroller ve standart testler
+        env:
+          NEDENMIS_ANIMATION_RESULT: ${{ github.workspace }}\release\animation-test-result.json
+          NEDENMIS_ANIMATION_DIAGNOSTICS: ${{ github.workspace }}\release\animation-pipeline-diagnostics.json
+          NEDENMIS_ANIMATION_OUTPUT: ${{ github.workspace }}\release\Why-does-ice-float-on-water.mp4
+        shell: pwsh
+        run: |
+          # Çıktı dosyaya da yazılır: hata durumunda annotation'a düşen log bu olur.
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $log = 'release/static-checks.log'
+          function Invoke-Step($name, $command) {
+            "[$name] başladı" | Tee-Object -FilePath $log -Append
+            $global:LASTEXITCODE = 0
+            Invoke-Expression "$command 2>&1" | Tee-Object -FilePath $log -Append
+            if ($LASTEXITCODE -ne 0) { "[$name] BAŞARISIZ (çıkış $LASTEXITCODE)" | Tee-Object -FilePath $log -Append; exit $LASTEXITCODE }
+            "[$name] geçti" | Tee-Object -FilePath $log -Append
+          }
+          Invoke-Step 'typecheck' 'npm run typecheck'
+          Invoke-Step 'lint' 'npm run lint'
+          Invoke-Step 'python' 'python -m unittest discover -s voice-engine -p "test_*.py"'
+          Invoke-Step 'drive-upload-test' 'python -m unittest scripts/test_drive_upload_release.py'
+          Invoke-Step 'asr-eval-test' 'python -m unittest scripts/test_turkish_asr_eval.py'
+          Invoke-Step 'vitest' 'npm run test'
+      - name: Üretim derlemesi
+        run: npm run build
+      - name: Geliştirme Electron açılışı
+        shell: cmd
+        run: |
+          if not exist release mkdir release
+          node scripts/electron-smoke.mjs --dev > release\dev-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\dev-electron-smoke.log
+          exit /b %CODE%
+      - name: Üretim Electron açılışı
+        shell: cmd
+        run: |
+          node scripts/electron-smoke.mjs > release\production-electron-smoke.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\production-electron-smoke.log
+          exit /b %CODE%
+      - name: Chatterbox V3 kaynak ve model kimliğini doğrula
+        shell: cmd
+        run: |
+          if not exist release mkdir release
+          python scripts/verify-chatterbox-source.py --output release/chatterbox-source.json
+          if errorlevel 1 (
+            echo ::error::Chatterbox V3 kaynak/model kimliği doğrulanamadı; Build yayınlanmayacak.
+            exit /b 1
+          )
+          python -c "import json;d=json.load(open('release/chatterbox-source.json',encoding='utf-8'));print(json.dumps({k:d[k] for k in ('status','sourceArchiveSha256','sourceVerified','modelVerified')},ensure_ascii=False))"
+      - name: Gerçek sentetik konuşmacı referansı
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\nedenmis-chatterbox" | Out-Null
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/fixtures/create_reference.ps1 -OutputPath "$env:RUNNER_TEMP\nedenmis-chatterbox\sapi-reference.wav"
+      - name: Resmî Türkçe V3 referansını test ortamına al
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/tr_m.flac" -OutFile "$env:RUNNER_TEMP\nedenmis-chatterbox\turkish-reference.flac"
+          if ((Get-Item "$env:RUNNER_TEMP\nedenmis-chatterbox\turkish-reference.flac").Length -lt 10000) { throw 'Türkçe referans indirilemedi.' }
+      - name: Gerçek Chatterbox V3 Türkçe klonlama ve video testi
+        env:
+          NEDENMIS_CHATTERBOX_E2E: '1'
+          NEDENMIS_CHATTERBOX_SETUP: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_CHATTERBOX_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\sapi-reference.wav
+          NEDENMIS_CHATTERBOX_TURKISH_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\turkish-reference.flac
+          NEDENMIS_CHATTERBOX_RESULT: ${{ github.workspace }}\release\chatterbox-test-result.json
+          NEDENMIS_TURKISH_QUALITY_MANIFEST: ${{ github.workspace }}\release\turkish-quality-manifest.json
+        shell: cmd
+        run: |
+          npm run test:chatterbox > release\chatterbox-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\chatterbox-e2e.log
+          exit /b %CODE%
+      - name: Gerçek Türkçe V3 üretimi + bağımsız ASR (yedi vaka)
+        if: success()
+        env:
+          NEDENMIS_TURKISH_TTS_E2E: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_CHATTERBOX_TURKISH_REFERENCE: ${{ runner.temp }}\nedenmis-chatterbox\turkish-reference.flac
+          NEDENMIS_VOICE_PYTHON: ${{ runner.temp }}\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe
+          NEDENMIS_TURKISH_TTS_REPORT: ${{ github.workspace }}\release\turkish-tts-asr.json
+        shell: pwsh
+        run: |
+          # ASR yalnızca yönetilen Python'a kurulur; test de aynı yorumlayıcıyı kullanır.
+          $python = "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe"
+          & $python -m pip install --only-binary=:all: faster-whisper==1.2.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:NEDENMIS_ASR_PYTHON = $python
+          cmd /c "npm run test:turkish-tts > release/turkish-tts-e2e.log 2>&1"
+          $code = $LASTEXITCODE
+          Get-Content release/turkish-tts-e2e.log -Tail 200
+          exit $code
+      - name: Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E
+        if: success()
+        env:
+          NEDENMIS_SKY_E2E: '1'
+          NEDENMIS_CHATTERBOX_STORAGE: ${{ runner.temp }}\nedenmis-chatterbox\storage
+          NEDENMIS_TURKISH_QUALITY_MANIFEST: ${{ github.workspace }}\release\turkish-quality-manifest.json
+          NEDENMIS_SKY_RESULT: ${{ github.workspace }}\release\sky-production-result.json
+          NEDENMIS_SKY_OUTPUT: ${{ github.workspace }}\release\Why-does-the-sky-look-blue.mp4
+        shell: cmd
+        run: |
+          npm run test:sky > release\sky-production-e2e.log 2>&1
+          set CODE=%ERRORLEVEL%
+          type release\sky-production-e2e.log
+          exit /b %CODE%
+      - name: Bağımsız Türkçe ASR anlaşılırlık kapısı
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path release/turkish-quality-manifest.json)) { Write-Host 'Değerlendirilecek ses manifesti yok.'; exit 0 }
+          $python = "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe"
+          & $python -m pip install --only-binary=:all: faster-whisper==1.2.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python voice-engine/quality_check.py --manifest release/turkish-quality-manifest.json --output release/turkish-quality-source-result.json
+          exit $LASTEXITCODE
+      - name: Windows x64 unpacked üretim (installer yok)
+        run: npm run pack:win-dir
+      - name: Taşınabilir ZIP
+        run: node scripts/package-portable.mjs
+      - name: ZIP’ten bağımsız aç, kopya SQLite, Rayleigh önizleme ve MP4 doğrula
+        if: success()
+        shell: pwsh
+        run: ./scripts/test-portable.ps1 -ZipPath ./release/NedenmisStudio-Portable.zip -VoiceTestRoot "$env:RUNNER_TEMP\nedenmis-chatterbox"
+      - name: Windows x64 NSIS kurucusu
+        if: success()
+        run: npm run dist:win
+      - name: Kur, terminalsiz aç ve SQLite doğrula
+        shell: pwsh
+        run: ./scripts/test-installer.ps1 -SetupPath ./release/NedenmisStudio-Setup.exe -VoiceTestRoot "$env:RUNNER_TEMP\nedenmis-chatterbox"
+      - name: Kurulu uygulama WAV/MP4 kanıtlarını topla
+        shell: pwsh
+        run: |
+          $installed = Get-Content release/installer-test-result.json -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force release/Kurulu-Uygulama-Testi | Out-Null
+          Copy-Item $installed.installedVoice.audioPath release/Kurulu-Uygulama-Testi/installed-turkish.wav -Force
+          Copy-Item $installed.installedExport.outputPath release/Kurulu-Uygulama-Testi/installed-four-scenes.mp4 -Force
+          $manifest = Get-Content release/turkish-quality-manifest.json -Raw | ConvertFrom-Json
+          $manifest.cases += [pscustomobject]@{ id='installed-app-turkish'; audio=$installed.installedVoice.audioPath; text='Kurulu Nedenmiş Studio uygulaması, gerçek referans sesle Türkçe konuşma üretiyor.'; required=$true }
+          $manifest.cases += [pscustomobject]@{ id='installed-app-four-scene-mp4'; audio=$installed.installedExport.outputPath; text='Sıvı suda moleküller sürekli titreşir ve birbirinin yanından geçer. Su donarken molekülleri düzenli bir kristal yapı oluşturur. Bu açık kristal kafes daha fazla yer kaplar ve buzun yoğunluğunu düşürür. Buzun suda yüzmesinin nedeni yoğunluğunun sudan daha düşük olmasıdır.'; required=$true }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content release/turkish-quality-manifest.json -Encoding UTF8
+          $python = "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\voice-engine\runtime\python.exe"
+          & $python voice-engine/quality_check.py --manifest release/turkish-quality-manifest.json --output release/turkish-quality-result.json
+          exit $LASTEXITCODE
+      - name: Kurulum boyutları ve SHA-256 manifesti
+        shell: pwsh
+        run: |
+          $files = @('release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip') | ForEach-Object {
+            $item = Get-Item $_
+            [pscustomobject]@{ name=$item.Name; bytes=$item.Length; sha256=(Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+          }
+          [pscustomobject]@{ version='1.1.0'; build=[int]$env:GITHUB_RUN_NUMBER; commit=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; files=$files; testedOn='windows-latest'; humanListeningPerformed=$false } | ConvertTo-Json -Depth 5 | Set-Content release/build-manifest.json -Encoding UTF8
+      - name: Türkçe ASR sonuçlarını PR raporuna yaz
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $qualityPath = $null
+          if (Test-Path release/turkish-quality-result.json) { $qualityPath = 'release/turkish-quality-result.json' }
+          elseif (Test-Path release/turkish-quality-source-result.json) { $qualityPath = 'release/turkish-quality-source-result.json' }
+          if ($qualityPath) {
+            $quality = Get-Content $qualityPath -Raw | ConvertFrom-Json
+            $lines = @("## Türkçe Chatterbox V3 ASR kalite raporu", "", "Çalışma: $($env:GITHUB_RUN_ID) · Sonuç: **$($quality.ok)**", "", "| Örnek | Zorunlu | ASR geçti | CER | WER | Kelime |", "|---|---:|---:|---:|---:|---:|")
+            foreach ($case in $quality.cases) { $lines += "| $($case.id) | $($case.required) | $($case.asrIntelligibilityPassed) | $('{0:F4}' -f [double]$case.cer) | $('{0:F4}' -f [double]$case.wer) | $($case.transcriptWords) |" }
+            $lines += "", "ASR: $($quality.asr.engine) / $($quality.asr.model), CPU $($quality.asr.computeType), forced language=tr. Eşikler: CER ≤ $($quality.thresholds.maxCER), WER ≤ $($quality.thresholds.maxWER).", "", "**İnsan dinlemesi yapılmadı.** ASR yalnızca anlaşılırlık kanıtıdır; doğal prozodi veya konuşmacı benzerliği kanıtı değildir."
+            foreach ($case in $quality.cases) {
+              $expected = ([string]$case.expectedText).Replace('|', '\|')
+              $transcript = ([string]$case.transcript).Replace('|', '\|')
+              $lines += "", "<details><summary>$($case.id) — transkript</summary>", "", "**Beklenen:** $expected", "", "**ASR:** $transcript"
+              if ($case.normalizedReference) { $lines += "", "**Kanon referans:** $($case.normalizedReference)", "", "**Kanon ASR:** $($case.normalizedTranscript)" }
+              $lines += "", "</details>"
+            }
+            if (Test-Path release/turkish-ab-progress.json) {
+              $ab = Get-Content release/turkish-ab-progress.json -Raw | ConvertFrom-Json
+              foreach ($item in $ab) { $lines += "", "<details><summary>$($item.id) — tokenizer tanısı</summary>", "", "Seed: $($item.seed) · Süre: $($item.duration) s · Token: $($item.tokenCount) · UNK: $($item.unknownTokens) · [tr] ID: $($item.languageTokenId)", "", "Token IDs: $($item.tokenIds -join ', ')", "", "Normalized: $($item.normalizedText)", "", "Decoded: $($item.decodedText)", "", "</details>" }
+            }
+            [IO.File]::WriteAllText("$PWD/release/turkish-quality-summary.md", ($lines -join "`n"))
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/turkish-quality-summary.md }
+          }
+          if (Test-Path release/animation-pipeline-diagnostics.json) {
+            $diagnostic = Get-Content release/animation-pipeline-diagnostics.json -Raw | ConvertFrom-Json
+            $lines = @("## Animasyon render aşama tanısı", "", "Durum: **$($diagnostic.status)** · Hata: $($diagnostic.error)", "", "| Aşama | Decode edilen video karesi | Video stream süresi | Container süresi |", "|---|---:|---:|---:|")
+            foreach ($stage in $diagnostic.stages) {
+              $video = $stage.probe.streams | Where-Object { $_.codec_type -eq 'video' } | Select-Object -First 1
+              $lines += "| $($stage.stage) | $($video.nb_read_frames) | $($video.duration) | $($stage.probe.format.duration) |"
+            }
+            $lines += "", '<details><summary>FFmpeg komutları ve ham probe</summary>', '', '```json', ($diagnostic | ConvertTo-Json -Depth 12), '```', '</details>'
+            [IO.File]::WriteAllText("$PWD/release/animation-pipeline-summary.md", ($lines -join "`n"))
+            if ($env:PR_NUMBER) { gh pr comment $env:PR_NUMBER --body-file release/animation-pipeline-summary.md }
+          }
+      - name: Başarısızlık loglarını CI annotation’a yaz
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          $sections = @()
+          Get-ChildItem release -Filter *.log -ErrorAction SilentlyContinue | ForEach-Object {
+            $raw = [IO.File]::ReadAllText($_.FullName).Replace("`r", "`n")
+            $clean = [regex]::Replace($raw, '\x1B\[[0-9;]*[A-Za-z]', '')
+            $tail = (($clean -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 70) -join "`n")
+            $escaped = $tail.Replace('%', '%25').Replace("`n", '%0A')
+            Write-Host "::error::$($_.Name)%0A$escaped"
+            $sections += "## $($_.Name)`n``````text`n$tail`n``````"
+          }
+          if ($sections.Count) {
+            [IO.File]::WriteAllText("$PWD/release/failure-summary.md", "CI $($env:GITHUB_RUN_ID) teknik hata özeti`n`n$($sections -join "`n`n")")
+            # workflow_dispatch olayında PR numarası boş gelir; dal adından çözülür.
+            $number = $env:PR_NUMBER
+            if (-not $number) {
+              $number = gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' 2>$null
+            }
+            if ($number) { gh pr comment $number --body-file release/failure-summary.md }
+            else { Write-Host 'PR bulunamadı; özet yalnızca artefaktta.' }
+          }
+      - name: 9:16 önizleme görsel regresyon testi
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          # Gerçek Chromium'da ölçer: uzun Türkçe başlık, dört kenara yakın öğe,
+          # alta yakın illüstrasyon ve alt altyazı dört farklı pencere boyutunda.
+          # Chromium yoksa test atlanmaz; açık hatayla durur.
+          npx playwright install chromium 2>&1 | Tee-Object -FilePath release/preview-regression.log
+          npx vite-node scripts/preview-regression.mjs 2>&1 | Tee-Object -FilePath release/preview-regression.log -Append
+          $code = $LASTEXITCODE
+          if (Test-Path .verification/build40/preview-regression.json) {
+            Copy-Item .verification/build40/preview-regression.json release/preview-regression.json -Force
+            if (Test-Path .verification/build40/previews) { Copy-Item .verification/build40/previews release/preview-shots -Recurse -Force }
+            $report = Get-Content release/preview-regression.json -Raw | ConvertFrom-Json
+            Write-Host "Önizleme: kompozisyon görünürlüğü $($report.viewports[0].visibleFraction), başlık satırları: $($report.titleWrapped -join ' / '), sonuç $($report.ok)"
+          }
+          exit $code
+      - name: Kare düzeyinde geçiş sınırı denetimi
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          # Bu test kendi MP4'ünü üretir ve sınırları kurgu verisinden türetir;
+          # başka bir adımın çıktısına bağımlı değildir, eksik dosya yüzünden atlanmaz.
+          $env:NEDENMIS_RENDER_DEBUG = '1'
+          npx vitest run tests/integration/boundaryInspection.test.ts 2>&1 | Tee-Object -FilePath release/boundary-inspection.log
+          $code = $LASTEXITCODE
+          if (Test-Path .verification/build20-parity/boundary-frames.json) {
+            Copy-Item .verification/build20-parity/boundary-frames.json release/boundary-frames.json -Force
+            $report = Get-Content release/boundary-frames.json -Raw | ConvertFrom-Json
+            Write-Host "Sınır denetimi: $($report.decodedFrames) kare, $($report.boundaries.Count) sınır, sonuç $($report.ok)"
+          }
+          exit $code
+      - name: Yedi Türkçe V3 vakasını PR raporuna yaz
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if (-not (Test-Path release/turkish-tts-asr.json)) { Write-Host 'Yedi vaka raporu yok.'; exit 0 }
+          $report = Get-Content release/turkish-tts-asr.json -Raw | ConvertFrom-Json
+          $lines = @('## Gerçek Chatterbox V3 Türkçe üretimi — yedi vaka', '', "Çalışma: $($env:GITHUB_RUN_ID) · Sonuç: **$($report.ok)** · Kontrol noktası: $($report.checkpoint)", '', '| Vaka | Durum | CER | WER | Süre (sn) | Ortalama dB | WAV |', '|---|---|---:|---:|---:|---:|---|')
+          foreach ($case in $report.cases) {
+            $lines += "| $($case.id) | $($case.asrStatus) | $('{0:F4}' -f [double]$case.cer) | $('{0:F4}' -f [double]$case.wer) | $('{0:F2}' -f [double]$case.duration) | $('{0:F1}' -f [double]$case.meanDb) | ``$($case.audio)`` |"
+          }
+          $lines += '', '**İnsan dinlemesi yapılmadı.** ASR yalnızca anlaşılırlık kanıtıdır; doğal prozodi veya konuşmacı benzerliği kanıtı değildir.'
+          [IO.File]::WriteAllText("$PWD/release/turkish-tts-summary.md", ($lines -join "`n"))
+          $number = $env:PR_NUMBER
+          if (-not $number) { $number = gh pr list --head "${{ github.ref_name }}" --state open --json number --jq '.[0].number' 2>$null }
+          if ($number) { gh pr comment $number --body-file release/turkish-tts-summary.md }
+      - name: Test ve ses/video kanıtlarını paketle
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          if (Test-Path "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\previews") { Copy-Item "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\previews" -Destination release -Recurse -Force }
+          if (Test-Path "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports") { Copy-Item "$env:RUNNER_TEMP\nedenmis-chatterbox\storage\exports" -Destination release -Recurse -Force }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NedenmisStudio-Windows-Test-Kanitlari
+          path: |
+            release/*.json
+            release/*.log
+            release/*.mp4
+            release/*.wav
+            release/previews/**
+            release/preview-shots/**
+            release/exports/**
+            release/Kurulu-Uygulama-Testi/**
+            release/Portable-Uygulama-Testi/**
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NedenmisStudio-Windows-x64
+          path: |
+            release/NedenmisStudio-Setup.exe
+            release/NedenmisStudio-Portable.zip
+            release/installer-test-result.json
+            release/chatterbox-test-result.json
+            release/sky-production-result.json
+            release/portable-test-result.json
+            release/turkish-quality-result.json
+            release/turkish-quality-source-result.json
+            release/build-manifest.json
+            release/chatterbox-source.json
+          if-no-files-found: error
+      - name: GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-v1.1.0-build$($env:GITHUB_RUN_NUMBER)"
+          $assets = @(
+            'release/NedenmisStudio-Setup.exe', 'release/NedenmisStudio-Portable.zip', 'release/installer-test-result.json', 'release/portable-test-result.json',
+            'release/chatterbox-test-result.json', 'release/chatterbox-source.json', 'release/sky-production-result.json', 'release/turkish-quality-result.json', 'release/turkish-quality-source-result.json', 'release/build-manifest.json',
+            'release/Why-does-the-sky-look-blue.mp4', 'release/previews/sky-original-subtitles.srt', 'release/previews/sky-export-subtitles.ass',
+            'release/boundary-frames.json', 'release/preview-regression.json', 'release/turkish-tts-asr.json'
+          )
+          $assets += Get-ChildItem release/Kurulu-Uygulama-Testi -File | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem release/Portable-Uygulama-Testi -File | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem release/exports -Filter *.mp4 -File | ForEach-Object { $_.FullName }
+          $assets += Get-ChildItem release/previews -Filter 'sky-*.wav' -File | ForEach-Object { $_.FullName }
+          gh release create $tag @assets --target $env:GITHUB_SHA --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build $env:GITHUB_RUN_NUMBER" --notes "Gerçek Chatterbox Multilingual V3 ve bağımsız Türkçe ASR ile sayı telaffuzu; üç sahneli Gökyüzü neden mavi görünür? Rayleigh animasyonu, sonuç anlatımı ve özgün altyazılar; 1080x1920/30 FPS MP4; SQLite yeniden açılış; önce bağımsız ZIP sonra NSIS kurulu uygulama önizleme/export kapıları doğrulandı. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model ilk kullanımda Ses Stüdyosu'ndan indirilir."
+
+  drive-upload:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.drive_upload_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test run’ını ve artefakt bütünlüğünü doğrula
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          EXPECTED_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test -n "$SOURCE_RUN_ID"
+          echo "SOURCE_RUN_ID=$SOURCE_RUN_ID" >> "$GITHUB_ENV"
+          gh run view "$SOURCE_RUN_ID" --json status,conclusion,headSha,headBranch,number,url,jobs > source-run.json
+          python - <<'PY'
+          import json, os
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          assert run['status'] == 'completed', 'Kaynak Windows production run tamamlanmamış.'
+          assert run['headBranch'] == os.environ['EXPECTED_BRANCH'], 'Kaynak run manuel işin branchiyle eşleşmiyor.'
+          job = next(item for item in run['jobs'] if item['name'] == 'windows-production')
+          steps = job['steps']
+          required = [
+              'Bağımlılıklar', 'Electron runtime doğrulaması', 'Statik kontroller ve standart testler',
+              'Üretim derlemesi', 'Geliştirme Electron açılışı', 'Üretim Electron açılışı',
+              'Gerçek sentetik konuşmacı referansı', 'Resmî Türkçe V3 referansını test ortamına al',
+              'Gerçek Chatterbox V3 Türkçe klonlama ve video testi',
+              'Gerçek gökyüzü V3, sayı WAVları ve Rayleigh MP4 E2E', 'Bağımsız Türkçe ASR anlaşılırlık kapısı',
+              'Windows x64 unpacked üretim (installer yok)', 'Taşınabilir ZIP',
+              'ZIP’ten bağımsız aç, kopya SQLite, Rayleigh önizleme ve MP4 doğrula',
+              'Windows x64 NSIS kurucusu', 'Kur, terminalsiz aç ve SQLite doğrula',
+              'Kurulu uygulama WAV/MP4 kanıtlarını topla', 'Kurulum boyutları ve SHA-256 manifesti',
+              'Test ve ses/video kanıtlarını paketle', '9:16 önizleme görsel regresyon testi',
+          ]
+          for name in required:
+              assert any(step['name'] == name and step['conclusion'] == 'success' for step in steps), f'Zorunlu test adayı başarısız/eksik: {name}'
+          failures = [step['name'] for step in steps if step['conclusion'] == 'failure']
+          assert all(name == 'GitHub Release' for name in failures), f'Release dışında başarısız adım var: {failures}'
+          assert sum(step['name'] == 'Run actions/upload-artifact@v4' and step['conclusion'] == 'success' for step in steps) >= 2
+          print(f"Doğrulanmış test run’ı: {run['url']} · {run['headSha']} · Release dışındaki kapılar başarılı")
+          PY
+          SOURCE_TAG="windows-v1.1.0-build$(python -c "import json; print(json.load(open('source-run.json'))['number'])")"
+          echo "SOURCE_TAG=$SOURCE_TAG" >> "$GITHUB_ENV"
+          python -c "import json; print('SOURCE_HEAD_SHA='+json.load(open('source-run.json'))['headSha'])" >> "$GITHUB_ENV"
+          python -c "import json; print('SOURCE_BRANCH='+json.load(open('source-run.json'))['headBranch'])" >> "$GITHUB_ENV"
+          gh run download "$SOURCE_RUN_ID" -n NedenmisStudio-Windows-x64 -D release-source
+          gh run download "$SOURCE_RUN_ID" -n NedenmisStudio-Windows-Test-Kanitlari -D release-evidence
+          cp release-evidence/Kurulu-Uygulama-Testi/installed-turkish.wav release-source/installed-turkish.wav
+          cp release-evidence/Kurulu-Uygulama-Testi/installed-four-scenes.mp4 release-source/installed-four-scenes.mp4
+          cp release-evidence/Why-does-the-sky-look-blue.mp4 release-source/Why-does-the-sky-look-blue.mp4
+          cp release-evidence/Portable-Uygulama-Testi/portable-sky.mp4 release-source/portable-sky.mp4
+          cp release-evidence/previews/sky-original-subtitles.srt release-source/sky-original-subtitles.srt
+          cp release-evidence/previews/sky-export-subtitles.ass release-source/sky-export-subtitles.ass
+          cp release-evidence/previews/sky-*.wav release-source/
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('release-source')
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          manifest = json.loads((root / 'build-manifest.json').read_text(encoding='utf-8-sig'))
+          assert str(manifest['runId']) == os.environ['SOURCE_RUN_ID']
+          assert manifest['commit'] == run['headSha']
+          for item in manifest['files']:
+              path = root / item['name']
+              digest = hashlib.sha256()
+              with path.open('rb') as source:
+                  for block in iter(lambda: source.read(8 * 1024 * 1024), b''):
+                      digest.update(block)
+              assert path.stat().st_size == item['bytes'], f"Boyut eşleşmedi: {path.name}"
+              assert digest.hexdigest() == item['sha256'], f"SHA-256 eşleşmedi: {path.name}"
+              print(f"SHA-256 doğrulandı: {path.name} · {digest.hexdigest()}")
+          quality = json.loads((root / 'turkish-quality-result.json').read_text(encoding='utf-8-sig'))
+          assert quality['ok'] and all(case['asrIntelligibilityPassed'] for case in quality['cases'] if case['required'])
+          installed = json.loads((root / 'installer-test-result.json').read_text(encoding='utf-8-sig'))
+          assert installed['ok'] and installed['persistentProjectsReopened'] >= 1
+          assert installed['installedAnimationPreview']['changed'] and installed['installedAnimationPreview']['played']
+          assert installed['installedExport']['status'] == 'completed'
+          sky = json.loads((root / 'sky-production-result.json').read_text(encoding='utf-8-sig'))
+          assert sky['ok'] and sky['animatedScenes'] >= 3 and sky['video']['decodedFrames'] == sky['video']['expectedFrames']
+          assert all(case['asrIntelligibilityPassed'] for case in quality['cases'] if case['id'].startswith('sky-'))
+          portable = json.loads((root / 'portable-test-result.json').read_text(encoding='utf-8-sig'))
+          assert portable['ok'] and portable['launchedFromExtractedZip'] and not portable['installerUsed']
+          assert portable['animationPreview']['changed'] and portable['animationPreview']['played']
+          assert portable['export']['status'] == 'completed'
+          print('Zorunlu ASR, gökyüzü, bağımsız ZIP, kurulu uygulama, animasyon, export ve SQLite kanıtları doğrulandı.')
+          PY
+      - name: Eksik Release’i doğrulanmış artefaktlardan oluştur veya mevcut Release’i doğrula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json 2>release-lookup.log; then
+            assets=(
+              release-source/NedenmisStudio-Setup.exe
+              release-source/NedenmisStudio-Portable.zip
+              release-source/installer-test-result.json
+              release-source/portable-test-result.json
+              release-source/chatterbox-test-result.json
+              release-source/sky-production-result.json
+              release-source/turkish-quality-result.json
+              release-source/turkish-quality-source-result.json
+              release-source/build-manifest.json
+              release-source/installed-turkish.wav
+              release-source/installed-four-scenes.mp4
+              release-source/Why-does-the-sky-look-blue.mp4
+              release-source/portable-sky.mp4
+              release-source/sky-original-subtitles.srt
+              release-source/sky-export-subtitles.ass
+            )
+            mapfile -d '' -t sky_wavs < <(find release-source -maxdepth 1 -type f -name 'sky-*.wav' -print0)
+            assets+=("${sky_wavs[@]}")
+            mapfile -d '' -t videos < <(find release-evidence/exports -maxdepth 1 -type f -name '*.mp4' -print0)
+            assets+=("${videos[@]}")
+            set +e
+            gh release create "$SOURCE_TAG" "${assets[@]}" \
+              --target "$SOURCE_HEAD_SHA" \
+              --title "Nedenmiş Studio 1.1.0 · Windows x64 · Build ${SOURCE_TAG##*build}" \
+              --notes "Gerçek Chatterbox Multilingual V3 A/B, bağımsız Türkçe ASR, dört sahneli 1080x1920/30 FPS MP4, altyazı, SQLite, sessiz NSIS kurulumu, terminalsiz açılış ve kurulu uygulama animasyon/WAV/MP4 kapıları doğrulandı. Dosyalar başarılı test run’ının SHA-256 doğrulanmış artefaktlarıdır. ASR anlaşılırlık kanıtıdır; insan dinlemesi veya doğal prozodi iddiası değildir. Model birkaç GB olduğu için ilk kullanımda Ses Stüdyosu'ndan indirilir." > release-recovery.log 2>&1
+            code=$?
+            set -e
+            cat release-recovery.log
+            if [ "$code" -ne 0 ]; then exit "$code"; fi
+            gh release view "$SOURCE_TAG" --json assets,targetCommitish,url > source-release.json
+          fi
+          python - <<'PY'
+          import json
+          run = json.load(open('source-run.json', encoding='utf-8'))
+          release = json.load(open('source-release.json', encoding='utf-8'))
+          assert release['targetCommitish'] == run['headSha'], 'Release hedef commiti test run’ı ile eşleşmiyor.'
+          names = {asset['name'] for asset in release['assets']}
+          required = {'NedenmisStudio-Setup.exe', 'NedenmisStudio-Portable.zip', 'build-manifest.json', 'turkish-quality-result.json', 'installed-turkish.wav', 'installed-four-scenes.mp4', 'sky-production-result.json', 'portable-test-result.json', 'Why-does-the-sky-look-blue.mp4', 'portable-sky.mp4'}
+          assert required <= names, f'Release assetleri eksik: {required - names}'
+          print(f"Doğrulanmış Release: {release['url']}")
+          PY
+      - name: Gerçek dosyaları Google Drive resumable upload ile yükle
+        env:
+          NEDENMIS_DRIVE_UPLOAD_SESSIONS: ${{ inputs.drive_upload_sessions }}
+        run: |
+          python -m unittest scripts/test_drive_upload_release.py
+          python scripts/drive_upload_release.py \
+            --directory release-source \
+            --output release-drive/drive-upload-result.json \
+            --source-run-id "$SOURCE_RUN_ID" \
+            --files NedenmisStudio-Setup.exe NedenmisStudio-Portable.zip build-manifest.json installer-test-result.json portable-test-result.json sky-production-result.json turkish-quality-result.json installed-turkish.wav installed-four-scenes.mp4 Why-does-the-sky-look-blue.mp4 portable-sky.mp4
+      - name: Drive bağlantılarını PR raporuna yaz
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUMBER=$(gh pr list --head "$SOURCE_BRANCH" --state all --json number --jq '.[0].number // empty')
+          if [ -n "$PR_NUMBER" ]; then gh pr comment "$PR_NUMBER" --body-file release-drive/drive-upload-result.md; fi
+      - name: Kurtarma hatasını PR raporuna yaz
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$SOURCE_BRANCH" ] && [ -f release-recovery.log ]; then
+            PR_NUMBER=$(gh pr list --head "$SOURCE_BRANCH" --state all --json number --jq '.[0].number // empty')
+            { echo '## Release/Drive kurtarma hatası'; echo; echo '```text'; tail -c 30000 release-recovery.log; echo; echo '```'; } > release-recovery-failure.md
+            if [ -n "$PR_NUMBER" ]; then gh pr comment "$PR_NUMBER" --body-file release-recovery-failure.md; fi
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NedenmisStudio-Drive-Yukleme-Kanitlari
+          path: |
+            source-run.json
+            source-release.json
+            release-lookup.log
+            release-recovery.log
+            release-recovery-failure.md
+            release-drive/*.json
+            release-drive/*.md
+          if-no-files-found: warn
