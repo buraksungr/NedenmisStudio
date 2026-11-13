@@ -25,6 +25,20 @@ export const HARD_CUT_OVERLAP_SECONDS = 0.01;
 /** İlk sahnenin giriş soluklaşması en fazla bu süre kadar sürer. */
 export const FIRST_SCENE_FADE_SECONDS = 0.5;
 
+/**
+ * Bir zamanı, xfade `offset` gibi FFmpeg ifadelerine yazılacak biçime getirir.
+ *
+ * Kritik: `toFixed(6)` bir sınırın ALTINA yuvarlayabilir. Örnek: 16.3333333…
+ * → `16.333333`, yani 490. kareden 0.3 µs ÖNCE. FFmpeg bu durumda gelen klibin
+ * son karesini düşürür ve MP4 beklenenden 1 kare kısa çıkar (ölçüldü: 818/819).
+ * Bu yüzden değeri önce kare ızgarasına oturtup 1e-9 yukarı itiyoruz: ifade asla
+ * bir kare sınırının gerisinde kalmaz, kare sayısı da tam kalır.
+ */
+export function frameExactSeconds(seconds: number): string {
+  const frames = Math.round(seconds * FRAME_RATE);
+  return (frames / FRAME_RATE + 1e-9).toFixed(9);
+}
+
 export interface SceneSlot {
   scene: Scene;
   index: number;

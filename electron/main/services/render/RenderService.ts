@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { sanitizeFilename } from '../../../../shared/utils.js';
-import { buildPlaybackTimeline, exportTransitionKind, FRAME_RATE, FIRST_SCENE_FADE_SECONDS, outgoingTransitionSeconds, snapToFrame } from '../../../../shared/playback.js';
+import { buildPlaybackTimeline, exportTransitionKind, frameExactSeconds, FRAME_RATE, FIRST_SCENE_FADE_SECONDS, outgoingTransitionSeconds, snapToFrame } from '../../../../shared/playback.js';
 import type { AppSettings, ChannelIdentity, ExportProgress, ExportRecord, Scene } from '../../../../shared/types.js';
 import { DEFAULT_IDENTITY } from '../../../../shared/defaults.js';
 import { renderAnimatedSceneSvg } from '../../../../shared/visuals/sceneAnimation.js';
@@ -178,6 +178,10 @@ export class RenderService {
       }
       if (controller.signal.aborted) throw new DOMException('İptal edildi', 'AbortError');
       const visualPath = join(work, 'visual.mp4'); this.report(record, 56, 'Geçişler birleştiriliyor');
+      // Zaman çizelgesinin TAM kare sayısı. xfade/`-t` davranışı platformlar arası
+      // farklılaşabildiği için (Windows FFmpeg 6.1.1'de 818/819 ölçüldü) birleştirme
+      // çıktısı bu sayıya kırpılır; böylece son MP4 kare sayısı tahmine kalmaz.
+      const timelineFrames = Math.max(1, Math.ceil(duration * FRAME_RATE - 1e-9));
       if (segments.length === 1) await this.ffmpeg.run(`${exportId}-visual`, ['-i', segments[0], '-c', 'copy', visualPath], { signal: controller.signal });
       else {
         // xfade zinciri: her sahne parçası kendi süresi + gelen geçiş süresi kadar
@@ -207,22 +211,26 @@ export class RenderService {
             // Kaydırma dışındaki her geçiş xfade'in doğrusal `fade` karışımıdır
             // (bkz. exportTransitionKind): ne siyah kare ne de gürültülü `dissolve`.
             const kind = exportTransitionKind(scene.transition);
-            filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${crossfade}:offset=${starts[index].toFixed(6)}${output}`);
+            filters.push(`${input}[v${index}]xfade=transition=${kind}:duration=${crossfade}:offset=${frameExactSeconds(starts[index])}${output}`);
           }
-          args.push('-filter_complex', filters.join(';'), '-map', `[vx${segments.length - 1}]`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', visualPath);
+          args.push('-filter_complex', filters.join(';'), '-map', `[vx${segments.length - 1}]`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-frames:v', String(timelineFrames), visualPath);
           await this.ffmpeg.run(`${exportId}-visual`, args, { signal: controller.signal, onProgress: (seconds) => this.report(record, 56 + Math.min(10, seconds / duration * 10), 'Sahne geçişleri işleniyor') });
         }
       }
       // Teşhis: geçiş birleştirmesinden çıkan video beklenen kare sayısını taşımalı.
       const visualProbe = await this.ffmpeg.probe(visualPath);
-      this.logger.info(`Geçiş sonrası video: ${visualProbe.frames ?? '?'} kare, ${visualProbe.duration}s (beklenen ${Math.ceil(duration * 30)} kare, ${duration}s)`);
+      const visualFrames = await this.ffmpeg.countFrames(visualPath);
+      this.logger.info(`Geçiş sonrası video: ${visualFrames} kare, ${visualProbe.duration}s (beklenen ${timelineFrames} kare, ${duration}s)`);
+      if (visualFrames !== timelineFrames) throw new Error(`Geçiş birleştirmesi kare kaybetti: ${visualFrames} / ${timelineFrames}.`);
       this.report(record, 68, 'Ses kanalları miksajlanıyor'); const audioPath = join(work, 'mix.m4a');
       await this.audio.mix(`${exportId}-audio`, { narration: project.scenes.filter((scene) => scene.narrationPath).map((scene) => ({ path: scene.narrationPath!, start: starts[project.scenes.indexOf(scene)], volume: project.audio.narrationVolume })), music: project.audio.musicClips, sfx: project.audio.sfxClips, musicVolume: project.audio.musicVolume, sfxVolume: project.audio.sfxVolume, duration, ducking: project.audio.musicDucking }, audioPath);
       this.report(record, 78, 'Altyazılar ve video birleştiriliyor'); const assPath = join(work, 'subtitles.ass'); await this.subtitles.write(project, assPath);
       await this.ffmpeg.run(`${exportId}-final`, ['-i', visualPath, '-i', audioPath, '-vf', this.subtitles.filterArgument(assPath), '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'libx264', '-preset', preset.preset, '-crf', String(preset.crf), '-profile:v', 'high', '-level', '4.1', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', preset.bitrate, '-ar', '48000', '-movflags', '+faststart', '-t', String(duration), record.outputPath], { signal: controller.signal, onProgress: (seconds) => this.report(record, 78 + Math.min(21, seconds / duration * 21), 'MP4 kodlanıyor') });
-      const expectedFrames = Math.max(1, Math.ceil(duration * 30 - 1e-9));
-      const completedVideo = await this.ffmpeg.probe(record.outputPath);
-      if (completedVideo.frames !== expectedFrames) throw new Error(`MP4 kare doğrulaması başarısız: ${completedVideo.frames ?? 'bilinmiyor'} / ${expectedFrames}. Export tamamlandı olarak işaretlenmedi.`);
+      const expectedFrames = timelineFrames;
+      // `probe().frames` MP4'te bulunmayan `nb_frames` etiketini okur; bu yüzden
+      // doğrulama gerçek kare sayımı (`-count_frames`) ile yapılır.
+      const completedFrames = await this.ffmpeg.countFrames(record.outputPath);
+      if (completedFrames !== expectedFrames) throw new Error(`MP4 kare doğrulaması başarısız: ${completedFrames} / ${expectedFrames}. Export tamamlandı olarak işaretlenmedi.`);
       const info = await stat(record.outputPath); record = this.exports.update(exportId, { status: 'completed', progress: 100, completedAt: new Date().toISOString(), fileSize: info.size });
       const completedProject = this.projects.get(project.id); completedProject.status = 'completed'; completedProject.recoveryNote = undefined; this.projects.update(completedProject);
       this.report(record, 100, 'Dışa aktarım tamamlandı'); await rm(work, { recursive: true, force: true }); this.logger.info(`Video oluşturuldu: ${record.outputPath}`);

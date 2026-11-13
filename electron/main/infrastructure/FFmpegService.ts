@@ -35,6 +35,14 @@ export class FFmpegService {
     const first = data.streams?.[0];
     return { duration: Number(data.format?.duration || 0), width: first?.width, height: first?.height, codec: first?.codec_name, sampleRate: Number(first?.sample_rate || 0) || undefined, channels: first?.channels, frames: Number(first?.nb_frames) || undefined, videoDuration: Number(first?.duration) || undefined };
   }
+  /** Dosyadaki GERÇEK kare sayısı. `nb_frames` MP4'te güvenilmez/boş olabilir. */
+  async countFrames(filePath: string): Promise<number> {
+    try {
+      const { stdout } = await execFileAsync(this.ffprobePath, ['-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'json', filePath], { timeout: 60000, maxBuffer: 5 * 1024 * 1024 });
+      const data = JSON.parse(stdout) as { streams?: Array<{ nb_read_frames?: string }> };
+      return Number(data.streams?.[0]?.nb_read_frames || 0);
+    } catch { return 0; }
+  }
   run(jobId: string, args: string[], options: FFmpegRunOptions = {}): Promise<void> {
     return this.execute(jobId, args, options);
   }
