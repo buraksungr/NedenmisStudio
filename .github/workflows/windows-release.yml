@@ -324,6 +324,7 @@ jobs:
             release/*.mp4
             release/*.wav
             release/previews/**
+            release/preview-shots/**
             release/exports/**
             release/Kurulu-Uygulama-Testi/**
             release/Portable-Uygulama-Testi/**
