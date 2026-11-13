@@ -29,10 +29,19 @@ function installClock(): Clock {
   vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => { clock.callbacks.delete(handle); clock.cancelled.push(handle); }));
   return clock;
 }
-/** Tek kareyi ilerletir: `requestAnimationFrame` zaman damgası mutlak oynatma zamanıdır. */
+/**
+ * Kareyi ilerletir: `requestAnimationFrame` zaman damgası mutlak oynatma zamanıdır.
+ * Yavaş çalıştırıcılarda geri çağrı bir sonraki tura kalabildiği için kayıtlı
+ * çağrılar bitene kadar tur döner (Windows CI'da tek tur yetmiyordu).
+ */
 async function frame(clock: Clock, timeMs: number): Promise<void> {
   clock.now = timeMs;
-  await act(async () => { const batch = [...clock.callbacks.values()]; clock.callbacks.clear(); batch.forEach((callback) => callback(clock.now)); });
+  for (let round = 0; round < 8; round += 1) {
+    const pending = [...clock.callbacks.values()];
+    if (!pending.length) break;
+    clock.callbacks.clear();
+    await act(async () => { pending.forEach((callback) => callback(clock.now)); });
+  }
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });

@@ -14,9 +14,23 @@ function installClock(): Clock {
   vi.stubGlobal('cancelAnimationFrame', vi.fn((handle: number) => { clock.callbacks.delete(handle); }));
   return clock;
 }
+/**
+ * Sahte kare saati.
+ *
+ * Oynatma saati `requestAnimationFrame` geri çağrılarıyla ilerler. Yavaş
+ * çalıştırıcılarda (Windows CI) efektin kaydettiği geri çağrı bir sonraki
+ * `act` turuna kalabiliyor; tek turda ilerletmek oynatma başlığını 0'da
+ * bırakıyordu (ölçüldü: beklenen 00:06,500, alınan 00:00,000). Bu yardımcı
+ * kayıtlı geri çağrılar bitene kadar turlar; iddialar aynen korunur.
+ */
 async function frame(clock: Clock, timeMs: number): Promise<void> {
   clock.now = timeMs;
-  await act(async () => { const batch = [...clock.callbacks.values()]; clock.callbacks.clear(); batch.forEach((callback) => callback(clock.now)); });
+  for (let round = 0; round < 8; round += 1) {
+    const pending = [...clock.callbacks.values()];
+    if (!pending.length) break;
+    clock.callbacks.clear();
+    await act(async () => { pending.forEach((callback) => callback(clock.now)); });
+  }
 }
 
 function mockApi(project: ReturnType<typeof createIceAnimationProject>): AppApi {
