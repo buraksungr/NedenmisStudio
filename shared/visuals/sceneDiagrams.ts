@@ -67,7 +67,7 @@ function scatteringDiagram(composition: SceneComposition, accent: string): strin
     <path d="M0 1000 Q540 710 1080 1000 L1080 1500 L0 1500Z" fill="#234D73" opacity=".7"/>
     <path d="M0 1040 Q540 760 1080 1040" fill="none" stroke="#7BDDFF" stroke-width="12"/>
     <g fill="${accent}">${Array.from({ length: 26 }, (_, i) => { const x = 420 + (i * 83) % 520; const y = 700 + (i * 137) % 440; return `<circle cx="${x}" cy="${y}" r="${6 + i % 5}"/><path d="M${x} ${y} l${-45 + i % 7 * 15} ${45 + i % 4 * 18}" stroke="${accent}" stroke-width="4"/>`; }).join('')}</g>
-    ${label('IŞIK SAÇILIMI', 90, 730)}${label('DALGA BOYU', 690, 1210)}`;
+    ${label('IŞIK SAÇILIMI', 90, 730)}${label('MAVİ SAÇILIM', 690, 1210)}`;
 }
 
 /* ---------------------------------------------------------------- uzay --- */

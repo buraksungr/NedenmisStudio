@@ -60,6 +60,7 @@ const probes = [
   { label: 'scene3-mid', time: 30.0, scene: 2 },
   { label: 'scene4-start', time: 38.5, scene: 3 },
   { label: 'scene4-mid', time: 45.0, scene: 3 },
+  { label: 'final', time: 51.5, scene: 3 },
 ];
 
 console.log(`toplam süre = ${duration.toFixed(3)} sn; başlangıçlar = ${timeline.starts.map((value) => value.toFixed(2)).join(', ')}`);

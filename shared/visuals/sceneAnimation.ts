@@ -227,12 +227,15 @@ function latticeExpansion(scene: Scene, t: number, duration: number, accent: str
     ${label('KRİSTAL KAFES  →  DAHA FAZLA HACİM', 540, 1450)}</g>`;
 }
 function floatingIce(scene: Scene, t: number, duration: number, accent: string, settings: ResolvedAnimation): string {
-  const bob = Math.sin(t * 1.45) * 13 * settings.intensity;
-  const tilt = Math.sin(t * .85) * 2.4 * settings.intensity;
+  // Buz bloğu hem yükselip alçalır hem de sudan gelen ince bir titreme ile
+  // sallanır. Tek sinüsün tepesinde hız SIFIRA düştüğü için sahne sonunda
+  // hareket neredeyse duruyordu; ikinci bileşen sürekli hareketi korur.
+  const bob = (Math.sin(t * 1.45) * 13 + Math.sin(t * 4.6) * 6) * settings.intensity;
+  const tilt = (Math.sin(t * .85) * 2.4 + Math.sin(t * 3.4) * 1.6) * settings.intensity;
   const inner = [[-90, -35], [0, -60], [90, -35], [-90, 65], [0, 40], [90, 65]].map(([x, y], i) => molecule(`ice-${i}`, x + Math.sin(t * 3 + i) * 2, y + Math.cos(t * 3 + i) * 2, .58, 0, accent)).join('');
   const underwater = Array.from({ length: Math.min(18, Math.max(8, Math.round(settings.particleCount * .55))) }, (_, i) => {
-    const x = 90 + hash(scene.id, i + 800) * 900 + Math.sin(t + i) * 17 * settings.intensity;
-    const y = 920 + hash(scene.id, i + 850) * 470 + Math.cos(t * 1.2 + i) * 14 * settings.intensity;
+    const x = 90 + hash(scene.id, i + 800) * 900 + Math.sin(t * 1.25 + i) * 22 * settings.intensity;
+    const y = 920 + hash(scene.id, i + 850) * 470 + Math.cos(t * 1.45 + i) * 17 * settings.intensity;
     return molecule(`under-ice-${i}`, x, y, .48, Math.sin(t * 1.8 + i) * 30, accent, .7);
   }).join('');
   const arrow = Math.sin(t * 2) * 10 * settings.intensity;
@@ -240,7 +243,7 @@ function floatingIce(scene: Scene, t: number, duration: number, accent: string, 
     <g data-animation-layer="floating-ice"><text x="540" y="440" text-anchor="middle" fill="#F2F8F5" font-family="Inter,Arial" font-size="43" font-weight="700">BUZ NEDEN BATMAZ?</text><text x="540" y="490" text-anchor="middle" fill="#AFC5BD" font-family="Inter,Arial" font-size="25">Daha düşük yoğunluk, kaldırma kuvvetiyle dengelenir</text>
     <path d="M0 820 Q120 790 240 820 T480 820 T720 820 T960 820 T1200 820 V1510 H0Z" fill="url(#ice-water)"/>
     ${underwater}<g data-floating-ice="true" transform="translate(540 ${n(925 + bob)}) rotate(${n(tilt)})"><path d="M-190 -85 L-85 -155 L85 -145 L190 -65 L160 110 L45 170 L-130 125 L-195 20Z" fill="url(#ice-body)" stroke="#C8F6FF" stroke-width="6"/><path d="M-190 -85 L0 -20 L190 -65 M0 -20 L45 170 M0 -20 L-85 -155" fill="none" stroke="#FFFFFF" stroke-opacity=".48" stroke-width="3"/>${inner}<text x="0" y="128" text-anchor="middle" fill="#16424C" font-family="Inter,Arial" font-size="20" font-weight="700">≈ %90 SU ALTINDA</text></g>
-    ${[0, 1, 2].map((i) => wave(825 + i * 48, 15 - i * 2, t * (1.5 - i * .2) + i * 1.3, i === 0 ? '#B0F3FA' : '#4AA8C0')).join('')}
+    ${[0, 1, 2].map((i) => wave(825 + i * 48, 18 - i * 2, t * (1.9 - i * .2) + i * 1.3, i === 0 ? '#B0F3FA' : '#4AA8C0')).join('')}
     <g data-buoyancy-arrow="true" transform="translate(825 ${n(arrow)})" fill="${accent}" stroke="${accent}"><path d="M0 1000 V800" stroke-width="8"/><path d="M0 790 l-22 36 h44Z" stroke="none"/><text x="0" y="1050" text-anchor="middle" font-family="Inter,Arial" font-size="22" stroke="none">KALDIRMA</text></g>
     </g>`;
 }
