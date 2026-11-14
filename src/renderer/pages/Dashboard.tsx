@@ -1,0 +1,41 @@
+import { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
+import { ArrowRight, CheckCircle2, Clock3, Download, FileVideo2, FolderKanban, Lightbulb, Plus, Sparkles, TrendingUp } from 'lucide-react';
+import type { DashboardStats, ExportRecord, TopicSuggestion } from '@shared/types';
+import { totalDuration } from '@shared/utils';
+import { useStudio } from '../store/StudioContext';
+import { Badge, Button, Card, EmptyState, InlineLink, SectionHeader } from '../components/ui';
+import { relativeDate, STATUS } from '../utils';
+import { fireAndForget } from '../utils/async';
+
+export function Dashboard() {
+  const { projects, navigate, openProject } = useStudio(); const [topics, setTopics] = useState<TopicSuggestion[]>([]); const [stats, setStats] = useState<DashboardStats>(); const [exports, setExports] = useState<ExportRecord[]>([]);
+  useEffect(() => { void Promise.all([window.nedenmis.topics.discover(), window.nedenmis.dashboard.stats(), window.nedenmis.exports.list()]).then(([nextTopics, nextStats, nextExports]) => { setTopics(nextTopics); setStats(nextStats); setExports(nextExports); }); }, []);
+  const startWithTopic = (topic?: TopicSuggestion) => { sessionStorage.setItem('nedenmis:new-video', JSON.stringify(topic ? { topic: topic.title, category: topic.category, mode: 'custom' } : { mode: 'automatic' })); navigate('create'); };
+  return <div className="h-full overflow-y-auto px-8 pb-10 scrollbar-thin">
+    <section className="relative mb-7 overflow-hidden rounded-[24px] bg-[#1b2821] px-8 py-8 text-[#f1f6ee] shadow-card dark:bg-[#202c24]">
+      <div className="absolute -right-20 -top-32 h-[360px] w-[360px] rounded-full border border-[#d8ff65]/10" /><div className="absolute -right-2 -top-20 h-[240px] w-[240px] rounded-full border border-[#d8ff65]/10" /><div className="absolute right-24 top-10 h-2 w-2 rounded-full bg-[#d8ff65]" />
+      <div className="relative max-w-2xl"><div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.16em] text-[#d8ff65]"><Sparkles size={14} />Bir sonraki merak burada başlıyor</div><h2 className="text-balance text-[32px] font-semibold leading-[1.18] tracking-[-.045em]">Merakı, etkileyici bir<br />hikâyeye dönüştürün.</h2><p className="mt-3 max-w-xl text-sm leading-6 text-[#b5c2b8]">Konudan senaryoya, sesten kurguya kadar tüm üretim masanız tek bir sakin çalışma alanında.</p><div className="mt-6 flex gap-3"><Button onClick={() => startWithTopic()} icon={Plus}>Yeni video oluştur</Button><button onClick={() => navigate('projects')} className="btn border border-white/10 bg-white/5 text-[#edf2e9] hover:bg-white/10">Projelere dön<ArrowRight size={15} /></button></div></div>
+    </section>
+    <section className="mb-8 grid grid-cols-4 gap-4">{[
+      { label: 'Toplam proje', value: stats?.projectCount ?? projects.length, icon: FolderKanban, note: `${stats?.weeklyProjects || 0} tanesi bu hafta` },
+      { label: 'Tamamlanan video', value: stats?.completedCount || 0, icon: CheckCircle2, note: 'Yayıma hazır üretim' },
+      { label: 'Üretilen içerik', value: `${Math.round((stats?.totalRenderedSeconds || 0) / 60)} dk`, icon: Clock3, note: 'Toplam video süresi' },
+      { label: 'Dışa aktarım', value: stats?.exportCount || 0, icon: TrendingUp, note: 'Tamamlanan MP4 çıktısı' },
+    ].map((item, index) => <motion.div key={item.label} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .04 }}><Card className="p-5"><div className="mb-5 flex items-center justify-between"><span className="text-[11px] font-medium text-muted">{item.label}</span><item.icon size={17} className="text-muted" strokeWidth={1.6} /></div><div className="text-2xl font-semibold tracking-[-.04em]">{item.value}</div><div className="mt-1 text-[10px] text-muted">{item.note}</div></Card></motion.div>)}</section>
+    <div className="grid grid-cols-[minmax(0,1.55fr)_minmax(310px,.85fr)] gap-6">
+      <div className="space-y-7">
+        <section><SectionHeader title="Son projeler" description="Kaldığınız yerden devam edin." action={<InlineLink onClick={() => navigate('projects')}>Tümünü gör</InlineLink>} />
+          {projects.length ? <div className="space-y-2">{projects.slice(0, 4).map((project) => <button key={project.id} onClick={() => fireAndForget(() => openProject(project.id))} className="group flex w-full items-center gap-4 rounded-2xl bg-panel p-3 text-left shadow-card transition-transform hover:-translate-y-0.5"><div className="flex h-[58px] w-[46px] shrink-0 items-center justify-center overflow-hidden rounded-lg bg-raised">{project.scenes[0]?.assetPath ? <img src={window.nedenmis.system.mediaUrl(project.scenes[0].assetPath)} className="h-full w-full object-cover" alt="" /> : <FileVideo2 size={18} className="text-muted" />}</div><div className="min-w-0 flex-1"><div className="truncate text-[13px] font-semibold">{project.name}</div><div className="mt-1 text-[11px] text-muted">{project.category} · {Math.round(totalDuration(project.scenes) || project.targetDuration)} sn · {relativeDate(project.updatedAt)}</div></div><Badge tone={STATUS[project.status].tone}>{STATUS[project.status].label}</Badge><ArrowRight size={15} className="mr-2 text-muted opacity-0 transition-opacity group-hover:opacity-100" /></button>)}</div> : <Card><EmptyState icon={FileVideo2} title="İlk hikâyenizi başlatın" description="Henüz bir proje yok. Otomatik konu önerilerinden seçin veya kendi sorunuzu yazın." action={<Button onClick={() => startWithTopic()} icon={Plus}>İlk videoyu oluştur</Button>} /></Card>}
+        </section>
+        <section><SectionHeader title="Bugünün merak önerileri" description="Kısa video potansiyeline göre seçildi." />
+          <div className="grid grid-cols-2 gap-3">{topics.slice(0, 4).map((topic) => <button key={topic.id} onClick={() => startWithTopic(topic)} className="group rounded-2xl bg-panel p-5 text-left shadow-card transition-all hover:-translate-y-0.5 hover:bg-raised"><div className="mb-3 flex items-center justify-between"><Badge tone="green">{topic.category}</Badge><span className="text-[10px] font-semibold text-muted">{topic.score} puan</span></div><h3 className="min-h-[42px] text-[14px] font-semibold leading-[1.45] tracking-[-.015em]">{topic.title}</h3><p className="mt-2 line-clamp-2 text-[11px] leading-5 text-muted">{topic.hook}</p><div className="mt-4 flex items-center gap-1 text-[11px] font-semibold text-accent opacity-0 transition-opacity group-hover:opacity-100">Bu konuyu kullan<ArrowRight size={13} /></div></button>)}</div>
+        </section>
+      </div>
+      <div className="space-y-6">
+        <Card className="p-5"><div className="mb-4 flex items-center gap-2"><Lightbulb size={17} className="text-accent" /><h3 className="text-sm font-semibold">Hızlı üretim</h3></div><p className="text-xs leading-5 text-muted">Kategoriyi ve süreyi seçin; konu, taslak senaryo ve sahne planı sizin için hazırlansın. Önemli adımlar onayınızı bekler.</p><Button variant="secondary" className="mt-4 w-full" icon={Sparkles} onClick={() => startWithTopic()}>Otomatik modu başlat</Button></Card>
+        <Card className="p-5"><div className="mb-4 flex items-center justify-between"><h3 className="text-sm font-semibold">Son dışa aktarımlar</h3><Download size={16} className="text-muted" /></div>{exports.length ? <div className="space-y-3">{exports.slice(0, 5).map((record) => <div key={record.id} className="rounded-xl bg-raised p-3"><div className="flex items-start gap-3"><div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-panel text-muted"><FileVideo2 size={15} /></div><div className="min-w-0 flex-1"><div className="truncate text-[11px] font-semibold">{record.projectName}</div><div className="mt-1 text-[10px] text-muted">{relativeDate(record.createdAt)} · {record.preset}</div></div>{record.status === 'completed' && <button className="icon-btn h-7 w-7" title="Klasörde göster" onClick={() => void window.nedenmis.exports.reveal(record.outputPath)}><Download size={13} /></button>}</div></div>)}</div> : <div className="py-8 text-center"><Download size={22} className="mx-auto mb-3 text-muted/50" /><p className="text-xs leading-5 text-muted">İlk MP4 çıktınız burada görünecek.</p></div>}</Card>
+      </div>
+    </div>
+  </div>;
+}
