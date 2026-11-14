@@ -342,9 +342,6 @@ function generic(project: Project, scene: Scene, t: number, accent: string, sett
   return `<g data-animation-layer="generic-particles">${particles}<ellipse cx="540" cy="900" rx="420" ry="315" fill="none" stroke="${accent}" stroke-width="2" stroke-dasharray="5 18" stroke-dashoffset="${n(t * 25)}" opacity=".3"/></g>`;
 }
 
-/** Klip tanımlayıcıları aynı belgede benzersiz olmalı (önizleme sayfası birden çok SVG barındırır). */
-let clipCounter = 0;
-
 export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity: ChannelIdentity, timeSeconds: number): string {
   const settings = resolveAnimation(project, scene);
   const duration = Math.max(.1, scene.duration || 10);
@@ -385,7 +382,9 @@ export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity:
   // okları, hacim endeksi, ölçüm çizgileri) yok ediyor ve "nesne hareketi"
   // eşiğini düşürüyordu. Bant yaklaşımı hem etiketi okunaklı tutar hem de
   // hareketin TAMAMINI korur.
-  const plateId = `caption-plate-${(clipCounter += 1)}`;
+  // Tanımlayıcı SAHNE KİMLİĞİNDEN türetilir: sayaç kullanılırsa aynı sahnenin
+  // iki render'ı farklı SVG üretir ve önizleme/dışa aktarım eşitliği bozulur.
+  const plateId = `caption-plate-${scene.id.replace(/[^a-zA-Z0-9_-]/g, '') || 'scene'}`;
   const plate = Number.isFinite(captionTop)
     ? `<linearGradient id="${plateId}" gradientUnits="userSpaceOnUse" x1="0" y1="${captionTop - 92}" x2="0" y2="${captionBottom + 62}">
         <stop offset="0" stop-color="#0A110F" stop-opacity="0"/>
