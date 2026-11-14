@@ -12,7 +12,7 @@
  */
 import { escapeXml } from '../utils.js';
 import type { Project, Scene } from '../types.js';
-import { classifyScene, hashText, matchesTerm, normalizeTurkish, type SceneComposition } from './sceneComposition.js';
+import { hashText, matchesTerm, normalizeTurkish, type SceneComposition } from './sceneComposition.js';
 
 const label = (text: string, x: number, y: number, size = 30, fill = '#EAF8FF', spacing = 4) =>
   `<text x="${x}" y="${y}" font-family="Inter,Arial" font-size="${size}" font-weight="700" fill="${fill}" letter-spacing="${spacing}">${escapeXml(text)}</text>`;
@@ -72,7 +72,7 @@ function scatteringDiagram(composition: SceneComposition, accent: string): strin
 
 /* ---------------------------------------------------------------- uzay --- */
 function orbitalDiagram(composition: SceneComposition, accent: string): string {
-  const { primary, secondary, glow } = composition.palette;
+  const { secondary, glow } = composition.palette;
   return `
     <defs><radialGradient id="planet"><stop stop-color="${glow}"/><stop offset=".55" stop-color="${secondary}"/><stop offset="1" stop-color="#102738"/></radialGradient>
     <radialGradient id="glow"><stop stop-color="${accent}" stop-opacity=".6"/><stop offset="1" stop-color="${accent}" stop-opacity="0"/></radialGradient></defs>
@@ -246,7 +246,7 @@ function layersDiagram(composition: SceneComposition, accent: string): string {
 }
 
 /* -------------------------------------------------------------- hava --- */
-function weatherDiagram(composition: SceneComposition, accent: string): string {
+function weatherDiagram(composition: SceneComposition, _accent: string): string {
   const { primary, glow } = composition.palette;
   const clouds = Array.from({ length: 5 }, (_, index) => `<g opacity=".92"><ellipse cx="${220 + index * 160}" cy="${640 + (index % 2) * 70}" rx="120" ry="60" fill="${primary}"/><ellipse cx="${270 + index * 160}" cy="${610 + (index % 2) * 70}" rx="80" ry="52" fill="${glow}"/></g>`).join('');
   const drops = Array.from({ length: 26 }, (_, i) => `<line x1="${120 + (i * 37) % 860}" y1="${880 + (i * 53) % 200}" x2="${104 + (i * 37) % 860}" y2="${960 + (i * 53) % 200}" stroke="${glow}" stroke-width="6" opacity=".75"/>`).join('');
