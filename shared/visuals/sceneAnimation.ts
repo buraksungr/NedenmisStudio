@@ -384,7 +384,8 @@ export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity:
   // hareketin TAMAMINI korur.
   // Tanımlayıcı SAHNE KİMLİĞİNDEN türetilir: sayaç kullanılırsa aynı sahnenin
   // iki render'ı farklı SVG üretir ve önizleme/dışa aktarım eşitliği bozulur.
-  const plateId = `caption-plate-${scene.id.replace(/[^a-zA-Z0-9_-]/g, '') || 'scene'}`;
+  const sceneKey = typeof scene.id === 'string' ? scene.id.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+  const plateId = `caption-plate-${sceneKey || 'scene'}`;
   const plate = Number.isFinite(captionTop)
     ? `<linearGradient id="${plateId}" gradientUnits="userSpaceOnUse" x1="0" y1="${captionTop - 92}" x2="0" y2="${captionBottom + 62}">
         <stop offset="0" stop-color="#0A110F" stop-opacity="0"/>
