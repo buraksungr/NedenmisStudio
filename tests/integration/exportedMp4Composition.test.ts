@@ -59,7 +59,7 @@ function projectWithTopic(): Project {
 function sceneOf(_project: Project): Scene {
   return {
     id: 's', number: 1, narration, visualDescription: 'Mum alevi', visualPrompt: '', assetType: 'procedural',
-    duration: 1.6, transition: 'none', cameraMovement: 'none', subtitles: generateSubtitleCues(narration, 1.6, 0),
+    duration: 1.6, transition: 'none', cameraMovement: 'static', subtitles: generateSubtitleCues(narration, 1.6, 0),
     subtitleTiming: 'estimated', status: 'ready', narrationDuration: 1.6,
   } as unknown as Scene;
 }
@@ -80,7 +80,7 @@ describe('BUILD 40 — gerçek 1080×1920 MP4 kompozisyonu', () => {
     await ffmpeg.run('b40-tone', ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=1.6', '-c:a', 'pcm_s16le', narrationPath]);
     const scene: Scene = {
       id: sceneId, number: 1, narration, visualDescription: 'Mum alevi', visualPrompt: '', assetType: 'procedural',
-      duration: 1.6, transition: 'none', cameraMovement: 'none', subtitles: generateSubtitleCues(narration, 1.6, 0),
+      duration: 1.6, transition: 'none', cameraMovement: 'static', subtitles: generateSubtitleCues(narration, 1.6, 0),
       subtitleTiming: 'estimated', status: 'ready', narrationPath, narrationDuration: 1.6,
     };
     project.scenes = [scene]; project.status = 'ready'; projects.update(project);

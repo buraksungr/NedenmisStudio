@@ -79,9 +79,20 @@ export class ProjectRepository {
     const source = this.get(projectId);
     const now = new Date().toISOString();
     const copy: Project = {
-      ...source, id: id('project'), name: `${source.name} — kopya`.slice(0, 120), status: source.scenes.length ? 'ready' : 'draft',
+      ...source, id: id('project'), name: `${source.name} — kopya`.slice(0, 120),
+      // Görseller kopyalanmadığı için kopya 'ready' olamaz; kendi görsellerini üretmeli.
+      status: source.scenes.length ? 'scenes_ready' : 'draft',
       createdAt: now, updatedAt: now, lastOpenedAt: undefined, recoveryNote: undefined,
-      scenes: source.scenes.map((scene) => ({ ...scene, id: id('scene'), subtitles: scene.subtitles.map((cue) => ({ ...cue, id: id('cue') })) })),
+      // BUILD 44: kopya proje KAYNAK projenin görsel/ses dosyalarını ÜSTÜNLENMEZ.
+      // Önceki sürüm `assetPath`/`narrationPath` alanlarını olduğu gibi kopyalıyordu;
+      // böylece kopya proje, eski projenin görsellerini kendi görselleri gibi
+      // gösteriyordu. Kopya kendi varlıklarını üretmek zorundadır.
+      scenes: source.scenes.map((scene) => ({
+        ...scene, id: id('scene'),
+        assetPath: undefined, narrationPath: undefined, visualProvider: undefined,
+        status: 'empty' as const, error: undefined,
+        subtitles: scene.subtitles.map((cue) => ({ ...cue, id: id('cue') })),
+      })),
       audio: { ...source.audio, musicClips: source.audio.musicClips.map((clip) => ({ ...clip, id: id('audio') })), sfxClips: source.audio.sfxClips.map((clip) => ({ ...clip, id: id('audio') })) },
     };
     this.persist(copy);

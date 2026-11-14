@@ -24,5 +24,18 @@ export const projectSchema = z.object({
 export const voiceSelectionSchema = z.object({ providerId: z.string(), voiceId: z.string(), speed: z.number().min(.5).max(2), pitch: z.number().min(-12).max(12), exaggeration: z.number().min(0).max(2).optional(), cfgWeight: z.number().min(0).max(1).optional(), temperature: z.number().min(.1).max(2).optional() });
 export const ttsRequestSchema = z.object({ text: z.string().trim().min(1).max(10000), selection: voiceSelectionSchema, referenceVoicePath: z.string().optional() });
 export const idSchema = z.string().min(1).max(160);
+/**
+ * Senaryo üretimi isteği.
+ *
+ * Sözleşme (`shared/types.ts` → `AppApi.ai.generateScript(request: ScriptRequest)`)
+ * frontend'in gönderdiği NESNEYİ tarif eder: `{ projectId, useResearch }`.
+ * Build 44 hatası: IPC katmanı bunu düz bir `projectId` DİZGESİ gibi
+ * ayrıştırıyordu ve Zod "Invalid input: expected string, received object"
+ * hatası veriyordu. Şema sözleşmenin tek kaynağıdır.
+ */
+export const scriptRequestSchema = z.object({
+  projectId: idSchema,
+  useResearch: z.boolean(),
+});
 export const apiKeySchema = z.string().max(1000);
 export const urlSchema = z.string().url().refine((url) => ['https:', 'http:'].includes(new URL(url).protocol), 'Yalnızca HTTP(S) adresleri açılabilir.');

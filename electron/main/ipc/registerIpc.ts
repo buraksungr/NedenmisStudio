@@ -2,11 +2,47 @@ import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron';
 import { cpus, freemem, totalmem } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { z } from 'zod';
-import { apiKeySchema, idSchema, projectInputSchema, projectSchema, ttsRequestSchema, urlSchema } from '../../../shared/validation.js';
+import { apiKeySchema, idSchema, projectInputSchema, projectSchema, scriptRequestSchema, ttsRequestSchema, urlSchema } from '../../../shared/validation.js';
 import type { AppContext } from '../services/AppContext.js';
 import type { MediaKind, VoiceProviderDetails } from '../../../shared/types.js';
 
 const pair = <A, B>(a: z.ZodType<A>, b: z.ZodType<B>) => z.tuple([a, b]);
+
+/**
+ * Zod hatasını kullanıcıya gösterilebilir Türkçe metne çevirir.
+ *
+ * Build 44: ham "Invalid input: expected string, received object" mesajı
+ * kullanıcıya hiçbir şey anlatmıyordu. Artık hangi alanın, neden ve nasıl
+ * düzeltileceği belirtilir.
+ */
+function describeZodIssue(issue: z.ZodIssue | undefined): string {
+  if (!issue) return 'Girdi doğrulanamadı.';
+  // Zod 4 API'si: `invalid_type`te `received` yok (girdi `input` alanında),
+  // `too_small`/`too_big`ta `type` yerine `origin`, enum hatası ise
+  // `invalid_enum_value` değil `invalid_value` kodunu taşır.
+  switch (issue.code) {
+    case 'invalid_type': {
+      const received = issue.input;
+      if (received === undefined || received === null) return 'Bu alan zorunludur.';
+      const kind = received === undefined ? 'undefined' : received === null ? 'null' : Array.isArray(received) ? 'array' : typeof received;
+      return `Beklenen tür: ${issue.expected}. Gelen tür: ${kind}.`;
+    }
+    case 'too_small':
+      return issue.origin === 'string' ? `En az ${issue.minimum} karakter olmalı.` : `En küçük değer ${issue.minimum}.`;
+    case 'too_big':
+      return issue.origin === 'string' ? `En fazla ${issue.maximum} karakter olabilir.` : `En büyük değer ${issue.maximum}.`;
+    case 'invalid_value':
+      return `Geçerli değerler: ${issue.values.join(', ')}.`;
+    case 'invalid_format':
+      return 'Değer biçimi geçersiz.';
+    case 'unrecognized_keys':
+      return `Tanınmayan alan: ${issue.keys.join(', ')}.`;
+    case 'invalid_union':
+      return 'Girdi şemaya uymuyor; alanların türlerini ve adlarını kontrol edin.';
+    default:
+      return issue.message || 'Girdi doğrulanamadı.';
+  }
+}
 const mediaKinds = z.enum(['generated-image', 'image', 'video', 'music', 'sfx', 'narration', 'reference-voice']);
 
 export function registerIpc(context: AppContext, window: BrowserWindow, initialStorage: string): void {
@@ -14,7 +50,7 @@ export function registerIpc(context: AppContext, window: BrowserWindow, initialS
     try { return await listener(...args); }
     catch (error) {
       context.logger.error(`IPC hatası · ${channel}`, error);
-      if (error instanceof z.ZodError) { const issue = error.issues[0]; const field = issue?.path.join('.'); const message = field === 'selectedText' ? 'Yeniden yazılacak metin boş olamaz. Önce metin seçin.' : `${field ? `${field}: ` : ''}${issue?.message || 'Girdi doğrulanamadı.'}`; throw new Error(message); }
+      if (error instanceof z.ZodError) { const issue = error.issues[0]; const field = issue?.path.join('.'); const message = field === 'selectedText' ? 'Yeniden yazılacak metin boş olamaz. Önce metin seçin.' : `${field ? `${field}: ` : ''}${describeZodIssue(issue)}`; throw new Error(message); }
       const message = error instanceof Error ? error.message : 'İşlem tamamlanamadı. Ayrıntılar günlük dosyasına kaydedildi.';
       throw new Error(message.length > 900 ? `${message.slice(0, 900)}…` : message);
     }
@@ -40,7 +76,10 @@ export function registerIpc(context: AppContext, window: BrowserWindow, initialS
   handle('projects:rename', (id, name) => context.projects.rename(...pair(idSchema, z.string().min(1).max(120)).parse([id, name])));
   handle('topics:discover', (category) => context.topics.discover(z.string().max(80).optional().parse(category)));
   handle('research:run', (id) => context.research.run(idSchema.parse(id)));
-  handle('ai:script', (id) => context.ai.generate(idSchema.parse(id)));
+  // Build 44: frontend `ScriptRequest` NESNESİ gönderiyor ({ projectId, useResearch }).
+  // Önceki kod düz bir proje kimliği DİZGESİ bekliyordu ve Zod
+  // "Invalid input: expected string, received object" hatası veriyordu.
+  handle('ai:script', (request) => { const data = scriptRequestSchema.parse(request); return context.ai.generate(data.projectId, data.useResearch); });
   handle('ai:scenes', (id) => context.ai.generateScenes(idSchema.parse(id)));
   handle('ai:rewrite', (request) => { const data = z.object({ projectId: idSchema, selectedText: z.string().trim().min(1, 'Yeniden yazılacak metin boş olamaz.').max(10000), instruction: z.string().max(1000), customInstruction: z.string().optional() }).parse(request); return context.ai.rewrite(data.projectId, data.selectedText, data.instruction === 'custom' ? data.customInstruction || 'Daha akıcı yaz' : data.instruction); });
   handle('visuals:regenerate', (id, sceneId) => context.visuals.regenerate(...pair(idSchema, idSchema).parse([id, sceneId])));

@@ -58,6 +58,11 @@ export interface Scene {
   visualProvider?: string;
   status: 'empty' | 'ready' | 'generating' | 'error';
   error?: string;
+  /**
+   * BUILD 44: görsel motorunun konuyu HAZIR bir bilimsel alana eşleyemediği
+   * durumda kullanıcıya gösterdiği açıklama. Alan boşsa konu temsil edilmiştir.
+   */
+  visualNote?: string;
 }
 
 export interface AudioClip {

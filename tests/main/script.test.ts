@@ -44,6 +44,35 @@ describe('Kanca, açıklama ve sonuç bölümleri', () => {
     } finally { database.close(); }
   });
 
+  it('sahne görsel yönlendirmesi KONUYA ÖZGÜDÜR (genel şablon değil)', async () => {
+    // BUILD 44: görsel yönlendirmesi önceki sürümde yalnızca altı anahtar
+    // sözcüğe bakıyordu; geri kalan her konu "Merak uyandıran ana soruyu
+    // simgeleyen merkez form" gibi genel bir metne düşüyordu. Bu metin
+    // görsel motoruna girdiği için konuya özgü olmayan sahneler, konuya özgü
+    // olmayan görsel üretiyordu.
+    const database = new AppDatabase(':memory:'); const projects = new ProjectRepository(database);
+    const local = new LocalScriptProvider();
+    const scripts = new ScriptService(projects, new Map([[local.id, local]]), () => local.id, () => ({ ...DEFAULT_IDENTITY, outroEnabled: true }));
+    try {
+      const directions: Record<string, string> = {};
+      for (const topic of ['Ahtapotlar nasıl renk değiştirir?', 'Kutup ayılarının derisi neden siyahtır?', 'Nehirler toprak nasıl taşır?', 'Yıldızlar nasıl doğar?']) {
+        const project = projects.create(projectInput({ topic, name: topic, targetDuration: 24 }));
+        await scripts.generate(project.id);
+        const generated = await scripts.generateScenes(project.id);
+        directions[topic] = generated.scenes.map((scene) => scene.visualDescription).join(' ');
+      }
+      const values = Object.values(directions);
+      // Dört farklı konu → dört farklı yönlendirme.
+      expect(new Set(values).size).toBe(4);
+      // Genel şablon metni KULLANILMAMALI.
+      expect(values.join(' ')).not.toContain('Merak uyandıran ana soruyu simgeleyen merkez form');
+      expect(directions['Ahtapotlar nasıl renk değiştirir?']).toMatch(/pigment|kromatofor/i);
+      expect(directions['Kutup ayılarının derisi neden siyahtır?']).toMatch(/kürk|deri|tüy/i);
+      expect(directions['Nehirler toprak nasıl taşır?']).toMatch(/akarsu|erozyon|toprak/i);
+      expect(directions['Yıldızlar nasıl doğar?']).toMatch(/yörünge|derin uzay|gaz bulut/i);
+    } finally { database.close(); }
+  });
+
   it('editörde değiştirilen sonucu, ana senaryoyu ve altyazıyı kalıcı olarak eşitler', async () => {
     const { database, projects, scripts, project } = setup();
     try {

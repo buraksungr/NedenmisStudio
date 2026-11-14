@@ -4,6 +4,7 @@ import type { ChannelIdentity, Project } from '../../../../shared/types.js';
 import type { ProjectRepository } from '../../infrastructure/database/ProjectRepository.js';
 import type { MediaRepository } from '../../infrastructure/database/MediaRepository.js';
 import type { VisualProvider } from './VisualProvider.js';
+import { classifyScene } from '../../../../shared/visuals/sceneComposition.js';
 
 export class VisualService {
   constructor(private readonly projects: ProjectRepository, private readonly media: MediaRepository, private readonly providers: Map<string, VisualProvider>, private readonly storagePath: () => string, private readonly identity: () => ChannelIdentity, private readonly activeProviderId: () => string) {}
@@ -19,6 +20,14 @@ export class VisualService {
       await provider.generate(project, scene, channelIdentity, outputPath);
       const info = await stat(outputPath);
       scene.assetPath = outputPath; scene.assetType = provider.id === 'procedural' ? 'procedural' : 'ai-image'; scene.visualProvider = provider.name; scene.status = 'ready';
+      // BUILD 44: konu hazır bir bilimsel alana eşlenemediyse bu DURUM gizlenmez;
+      // kullanıcıya konunun neden jeneral çizime düştüğü açıkça bildirilir.
+      if (provider.id === 'procedural') {
+        const composition = classifyScene(project, scene);
+        scene.visualNote = composition.unrepresentable
+          ? `Bu kavram hazır bir bilimsel görsel kalıba eşlenemedi (eşleşme: ${composition.keywords.length ? composition.keywords.join(', ') : 'yok'}). Konuya özgü bir mekanizma yerine konu imzasından türetilen genel bilimsel çizim kullanıldı; sahne metnini veya görsel yönlendirmesini özgülleştirerek daha doğru bir temsil elde edebilirsiniz.`
+          : undefined;
+      } else scene.visualNote = undefined;
       this.media.upsertByPath({ kind: 'generated-image', name: `${project.name} · Sahne ${scene.number}`, path: outputPath, mimeType: 'image/png', size: info.size, projectId: project.id });
       project.status = 'production';
     } catch (error) { scene.status = 'error'; scene.error = error instanceof Error ? error.message : 'Görsel üretilemedi.'; throw error; }

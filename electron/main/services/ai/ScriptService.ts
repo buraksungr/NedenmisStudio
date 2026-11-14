@@ -8,9 +8,25 @@ import type { LlmProvider, SceneDirection } from './LlmProvider.js';
 export class ScriptService {
   constructor(private readonly projects: ProjectRepository, private readonly providers: Map<string, LlmProvider>, private activeProviderId: () => string, private readonly identity?: () => ChannelIdentity) {}
   private provider(): LlmProvider { return this.providers.get(this.activeProviderId()) || this.providers.get('local-script')!; }
-  async generate(projectId: string): Promise<Project> {
+  /**
+   * Senaryo üretir.
+   *
+   * `useResearch` sözleşmede belirtilir: false ise araştırma sonuçları
+   * sağlayıcıya verilmez (kullanıcı yalnızca kendi bilgisine dayanacak bir
+   * taslak istiyorsa). Varsayılan `true` — eski davranış.
+   */
+  async generate(projectId: string, useResearch = true): Promise<Project> {
     const project = this.projects.get(projectId);
-    const generated = (await this.provider().generateScript({ topic: project.topic, category: project.category, targetDuration: project.targetDuration, narrationStyle: project.narrationStyle, instructions: project.instructions, research: project.research })).trim();
+    const provider = this.provider();
+    const research = useResearch ? project.research : { status: 'not_started' as const, sources: [] };
+    let generated = '';
+    try {
+      generated = (await provider.generateScript({ topic: project.topic, category: project.category, targetDuration: project.targetDuration, narrationStyle: project.narrationStyle, instructions: project.instructions, research })).trim();
+    } catch (error) {
+      // Sağlayıcı hatası kullanıcıya anlamsız bir Zod/ham hata olarak yansımasın.
+      throw new Error(`Senaryo üretilemedi: ${error instanceof Error ? error.message : 'bilinmeyen hata'}`);
+    }
+    if (!generated) throw new Error('Senaryo üretilemedi: sağlayıcı boş metin döndürdü.');
     const sections = parseScriptSections(generated);
     project.scriptSections = sections; project.script = composeScript(sections);
     project.status = 'script_ready'; project.scenes = [];
@@ -53,7 +69,9 @@ export class ScriptService {
   private structuredDirections(project: Project, sections: ScriptSections): SceneDirection[] {
     const direction = (narration: string, section: SceneDirection['section']): SceneDirection => ({
       narration: narration.trim(), section,
-      visualDescription: this.visualDirection(narration, section === 'hook' ? 0 : 1, 3),
+      // Sınıflandırma hem KONU hem anlatım metnini kullanır: yerel sağlayıcı
+      // anlatımı jenerik yazdığında bile sahne konuya özgü kalır.
+      visualDescription: this.visualDirection(`${project.topic} ${narration}`, section === 'hook' ? 0 : 1, 3),
       visualPrompt: `${project.topic}, ${narration}. Dikey 9:16 eğitici bilimsel infografik; hareketli nesneler ve anlatımla doğrudan ilişkili mekanizma, yazısız.`,
     });
     const explanationSentences = sections.explanation.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) || [];
@@ -70,13 +88,36 @@ export class ScriptService {
     ];
   }
 
+  /**
+   * Sahnenin görsel yönlendirmesi.
+   *
+   * BUILD 44: önceki sürüm yalnızca altı anahtar sözcük tanıyordu; geri
+   * kalan her konu "Merak uyandıran ana soruyu simgeleyen merkez form" gibi
+   * genel bir metne düşüyordu. Bu metin görsel motoruna girdiği için konuya
+   * özgü olmayan sahneler konuya özgü olmayan görsel üretiyordu. Artık
+   * metin, konu sınıflandırıcısıyla eşleştirilir ve alana özgü, konuyu
+   * gerçekten anlatan bir yönlendirme yazılır.
+   */
   private visualDirection(text: string, index: number, total: number): string {
     const lower = text.toLocaleLowerCase('tr-TR');
-    if (/gökyüzü|mavi|ışık|güneş/.test(lower)) return 'Güneş ışığı atmosfere girerken dalga boylarının saçılmasını katmanlı ışınlar ve parçacıklarla gösteren bilimsel diyagram.';
-    if (/ay|kara delik|uzay|dünya|yıldız|gezegen/.test(lower)) return 'Anlatılan gök cisimlerini ölçek ilişkisi ve yörünge çizgileriyle gösteren derin uzay kompozisyonu.';
-    if (/beyin|hafıza|zaman|bellek|deja/.test(lower)) return 'Beyindeki ilgili bölgeler ve bilgi akışı arasındaki bağlantıyı gösteren hareketli nöral ağ diyagramı.';
-    if (/su|buz|deniz|okyanus|molekül/.test(lower)) return 'Su molekülleri ve anlatılan fiziksel değişimin önce-sonra durumunu gösteren kesit infografiği.';
-    if (/kedi|karınca|hayvan|ayı|böcek/.test(lower)) return 'Canlının davranışını ve çevresiyle kurduğu ilişkiyi açıklayan yakın plan illüstrasyon ve işaretli oklar.';
+    const stem = (term: string) => new RegExp(`(?<![a-zçğıöşü])${term}`, 'i').test(lower);
+    if (stem('gökyüzü') || stem('rayleigh') || (stem('ışık') && (stem('mavi') || stem('saçıl')))) return 'Güneş ışığı atmosfere girerken dalga boylarının saçılmasını katmanlı ışınlar ve parçacıklarla gösteren bilimsel diyagram.';
+    if (stem('galaksi') || (stem('yıldız') && (stem('doğ') || stem('bulut')))) return 'Yıldızın bir gaz bulutundan doğuşunu sarmal kollar ve çekim kuvveti çizgileriyle gösteren derin uzay kompozisyonu.';
+    if (stem('gezegen') || stem('yörünge') || stem('uzay') || stem('kara delik')) return 'Anlatılan gök cisimlerini ölçek ilişkisi ve yörünge çizgileriyle gösteren derin uzay kompozisyonu.';
+    if (stem('beyin') || stem('hafıza') || stem('nöron') || stem('bellek')) return 'Beyindeki ilgili bölgeler ve bilgi akışı arasındaki bağlantıyı gösteren hareketli nöral ağ diyagramı.';
+    // Pigment/kromatofor kuralı, kürk/deri kuralından ÖNCE gelir: "derisindeki
+    // kromatofor" ifadesi her iki kurala da uyar ve öncelik doğru kuralı seçmeli.
+    if (stem('kromatofor') || stem('pigment') || stem('renk değiştir')) return 'Canlının derisindeki pigment hücrelerinin genişleme ve daralmasını gösteren renk değiştirme kesiti.';
+    if (stem('kürk') || (stem('deri') && (stem('tüy') || stem('siyah') || stem('kürk')))) return 'Kürk ve deri kesitini, ışığın soğurulmasıyla birlikte mikroskobik tüy yapısıyla gösteren ışık soğurma diyagramı.';
+    if (stem('hücre') || stem('mitoz') || stem('nükleus') || stem('bölün')) return 'Hücrenin zar, çekirdek ve organel yapısını ya da bölünme aşamalarını gösteren mikroskobik hücre diyagramı.';
+    if (stem('nehir') || stem('akarsu') || stem('erozyon') || stem('toprak')) return 'Akarsuyun toprak ve çakıl taşımasını, erozyonu ve çökelmeyi gösteren nehir kanalı kesiti.';
+    if (stem('molekül') || stem('buz') || stem('deniz') || stem('okyanus') || stem('yoğunluk')) return 'Su molekülleri ve anlatılan fiziksel değişimin önce-sonra durumunu gösteren kesit infografiği.';
+    if (stem('fotosentez') || stem('tepkime') || stem('atom') || stem('moleküler') || stem('kimya')) return 'Atom ve molekül bağlarının oluşumunu gösteren reaksiyon şeması.';
+    if (stem('kuvvet') || stem('enerji') || stem('hız') || stem('mıknatıs') || stem('elektrik')) return 'Kuvvet, enerji ve hareket yönlerini oklarla gösteren kuvvet diyagramı.';
+    if (stem('yer kabuğu') || stem('deprem') || stem('volkan') || stem('levha')) return 'Yer kabuğu katmanlarını, levha hareketlerini ve magmayı gösteren jeolojik kesit.';
+    if (stem('bulut') || stem('yağmur') || stem('hava') || stem('fırtına') || stem('iklim')) return 'Bulut oluşumu, yağış ve rüzgâr akışını gösteren hava durumu diyagramı.';
+    if (stem('teknoloji') || stem('yapay zeka') || stem('yapay zekâ') || stem('çip') || stem('devre')) return 'Veri akışını ve bağlantı noktalarını gösteren devre şeması.';
+    if (stem('hayvan') || stem('ahtapot') || stem('balık') || stem('kuş') || stem('böcek') || stem('ayı') || stem('penguen')) return 'Canlının davranışını ve çevresiyle kurduğu ilişkiyi açıklayan yakın plan illüstrasyon ve işaretli oklar.';
     return `${index === 0 ? 'Merak uyandıran ana soruyu simgeleyen merkez form' : index === total - 1 ? 'Açıklamanın bütününü birleştiren sonuç diyagramı' : 'Anlatılan mekanizmayı adım adım açıklayan katmanlı süreç diyagramı'}; sahnedeki şu ifadeyle doğrudan ilişkili: ${text.slice(0, 180)}`;
   }
 }

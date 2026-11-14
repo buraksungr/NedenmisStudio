@@ -1,5 +1,7 @@
 import type { AnimationPreset, ChannelIdentity, Project, ResolvedAnimation, Scene, SceneAnimationSettings } from '../types.js';
 import { buildArtworkSvg, diagramFor } from './sceneArtwork.js';
+import { CAPTION_BAND_TOP, splitDiagramLabels } from './sceneDiagrams.js';
+import { classifyScene } from './sceneComposition.js';
 
 export const ANIMATION_PRESETS: { id: AnimationPreset; label: string }[] = [
   { id: 'auto', label: 'Konuya göre otomatik' },
@@ -40,17 +42,33 @@ export function resolveAnimationPreset(project: Project, scene: Scene): Exclude<
   if (water && /genişle|hacim|yoğun|kafes|expand|density|volume|lattice/i.test(text)) return 'lattice-expansion';
   if (water && /kristal|crystal/i.test(text)) return 'crystallization';
   if (water) return 'liquid-molecules';
-  if (/galaksi|evren|kara delik|yıldız|galaxy|universe|black hole|nebula|cosmic/i.test(text)) return 'galaxy';
-  if (/gezegen|yörünge|güneş|ay\b|dünya|yerçekimi|planet|orbit|solar|gravity|moon/i.test(text)) return 'orbital';
-  if (/hücre|kan|damar|organik|yaşam|cell|blood|vessel|organ|biolog/i.test(text)) return 'cellular';
-  if (/kimya|tepkime|reaksiyon|bağ kur|moleküler|chemical|reaction|compound/i.test(text)) return 'reaction';
-  if (/beyin|sinir|nöron|brain|neural|neuron|synap/i.test(text)) return 'neural';
-  if (/teknoloji|bilgisayar|yapay zeka|internet|veri|çip|devre|data|digital|circuit|computer/i.test(text)) return 'data-flow';
-  if (/nehir|akarsu|erozyon|river|stream|erosion/i.test(text)) return 'river-flow';
-  if (/hava|bulut|yağmur|rüzgâr|rüzgar|fırtına|weather|cloud|rain|wind|storm/i.test(text)) return 'weather-systems';
-  if (/ışık|elektrik|manyetik|dalga|frekans|enerji|mıknatıs|light|electric|magnet|wave|frequency|energy/i.test(text)) return 'energy-waves';
-  if (/yer kabuğu|levha|deprem|volkan|jeoloji|plate|tectonic|earthquake|geolog/i.test(text)) return 'geological';
-  return 'generic-particles';
+  // BUILD 44: kalan alanlar Türkçe'ye uygun sınıflandırıcıyla belirlenir.
+  // Önceki sürümde dar anahtar sözcük listesi kullanılıyordu; "ayılar"
+  // (kutup ayı) "ay" (uydurma ayı) ile eşleşip yörünge animasyonu seçiyordu.
+  const domain = classifyScene(project, scene).domain;
+  switch (domain) {
+    case 'light': return 'light-scattering';
+    case 'space': return /galaksi|galaxy|nebula|kara delik|black hole/i.test(text) ? 'galaxy' : 'orbital';
+    case 'cell':
+    case 'anatomy': return 'cellular';
+    case 'organism':
+      // Kromatofor/pigment: hücrelerin genişleyip daralması → 'cellular'.
+      if (/pigment|kromatofor|renk değiştir|chromatophore|colour change|color change/i.test(text)) return 'cellular';
+      // Kürk/deri: gelen ışık ve ısı (güneş) ile kaybedilen ısı (rüzgâr) →
+      // kürkün ısı tutma ve ışık soğurma davranışını gösteren ortam hareketi.
+      if (/kürk|tüy|pelt|fur|deri|skin|ısı|heat/i.test(text)) return 'weather-systems';
+      // Buzul/deniz canlıları: sıcaklık ve yağış.
+      if (/(^|[^a-zçğıöşü])(kar|snow|buz|ice|soğuk|kutup|polar|arctic)([^a-zçğıöşü]|$)/i.test(text)) return 'weather-systems';
+      return 'generic-particles';
+    case 'chemistry': return 'reaction';
+    case 'physics': return 'energy-waves';
+    case 'earth': return 'geological';
+    case 'river': return 'river-flow';
+    case 'weather': return 'weather-systems';
+    case 'technology': return 'data-flow';
+    case 'brain': return 'neural';
+    default: return 'generic-particles';
+  }
 }
 
 export function resolveAnimation(project: Project, scene: Scene): ResolvedAnimation {
@@ -129,7 +147,7 @@ function lightScattering(scene: Scene, t: number, duration: number, accent: stri
     ${molecules}${incoming}${transmitted}${scattered}
     <g transform="translate(540 1325)"><path d="M-150 0 Q0 -120 150 0 Q0 120 -150 0Z" fill="#102A3E" stroke="#A4E5FF" stroke-width="6"/><circle r="61" fill="#4BAFE7"/><circle r="27" fill="#10202C"/><circle cx="18" cy="-18" r="10" fill="#E8FAFF"/></g>
     <text x="105" y="665" fill="#FFF1B2" font-family="Inter,Arial" font-size="23" font-weight="700">GÜNEŞ IŞIĞI</text><text x="650" y="1240" fill="#9DE3FF" font-family="Inter,Arial" font-size="25" font-weight="700">MAVİ SAÇILIM</text>
-    ${label('FOTONLAR  +  MOLEKÜLLER  +  SAÇILIM')}</g>`;
+    </g>`;
 }
 function liquid(scene: Scene, t: number, duration: number, accent: string, settings: ResolvedAnimation): string {
   const count = Math.min(26, Math.max(8, Math.round(settings.particleCount * .65)));
@@ -145,12 +163,12 @@ function liquid(scene: Scene, t: number, duration: number, accent: string, setti
     const y = 1450 - ((t * (30 + i * 2) + i * 91) % 620);
     return `<circle data-flow-particle="${i}" cx="${n(110 + hash(scene.id, i + 500) * 850)}" cy="${n(y)}" r="${n(3 + hash(scene.id, i) * 6)}" fill="none" stroke="#8DE5F0" stroke-width="2" opacity="${n(.15 + .35 * Math.sin(Math.PI * (1450 - y) / 620))}"/>`;
   }).join('');
-  return `<defs><linearGradient id="liquid-fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2D859B" stop-opacity=".42"/><stop offset="1" stop-color="#123844" stop-opacity=".78"/></linearGradient></defs>
+  return `<defs><linearGradient id="liquid-fill" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2D859B" stop-opacity=".22"/><stop offset="1" stop-color="#123844" stop-opacity=".5"/></linearGradient></defs>
     <g data-animation-layer="liquid"><circle cx="540" cy="570" r="190" fill="#63CDE2" opacity=".06"/><path d="M120 580 Q540 430 960 580" fill="none" stroke="${accent}" stroke-width="2" opacity=".45"/>
     <text x="540" y="560" text-anchor="middle" fill="#F2F8F5" font-family="Inter,Arial" font-size="38" font-weight="700">SIVIDA SÜREKLİ HAREKET</text><text x="540" y="610" text-anchor="middle" fill="#AFC5BD" font-family="Inter,Arial" font-size="25">Moleküller titreşir, döner ve yer değiştirir</text>
     <path d="M0 720 Q120 690 240 720 T480 720 T720 720 T960 720 T1200 720 V1530 H0Z" fill="url(#liquid-fill)"/>
     ${[0, 1, 2].map((i) => wave(735 + i * 48, 12 + i * 4, t * (1.3 - i * .18) + i, i === 0 ? '#8DE5F0' : '#4AA8C0')).join('')}
-    ${molecules}${bubbles}${label('TİTREŞİM  +  DÖNME  +  AKIŞ')}</g>`;
+    ${molecules}${bubbles}</g>`;
 }
 type CrystalPoint = { x: number; y: number };
 function crystalPoints(): CrystalPoint[] {
@@ -206,21 +224,21 @@ function floatingIce(scene: Scene, t: number, duration: number, accent: string, 
     return molecule(`under-ice-${i}`, x, y, .48, Math.sin(t * 1.8 + i) * 30, accent, .7);
   }).join('');
   const arrow = Math.sin(t * 2) * 10 * settings.intensity;
-  return `<defs><linearGradient id="ice-water" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2C91A9" stop-opacity=".48"/><stop offset="1" stop-color="#102F3C" stop-opacity=".85"/></linearGradient><linearGradient id="ice-body" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#DDFBFF" stop-opacity=".92"/><stop offset="1" stop-color="#62C9DE" stop-opacity=".62"/></linearGradient></defs>
+  return `<defs><linearGradient id="ice-water" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#2C91A9" stop-opacity=".48"/><stop offset="1" stop-color="#102F3C" stop-opacity=".85"/></linearGradient><linearGradient id="ice-body" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#DDFBFF" stop-opacity=".5"/><stop offset="1" stop-color="#62C9DE" stop-opacity=".38"/></linearGradient></defs>
     <g data-animation-layer="floating-ice"><text x="540" y="440" text-anchor="middle" fill="#F2F8F5" font-family="Inter,Arial" font-size="43" font-weight="700">BUZ NEDEN BATMAZ?</text><text x="540" y="490" text-anchor="middle" fill="#AFC5BD" font-family="Inter,Arial" font-size="25">Daha düşük yoğunluk, kaldırma kuvvetiyle dengelenir</text>
     <path d="M0 820 Q120 790 240 820 T480 820 T720 820 T960 820 T1200 820 V1510 H0Z" fill="url(#ice-water)"/>
     ${underwater}<g data-floating-ice="true" transform="translate(540 ${n(925 + bob)}) rotate(${n(tilt)})"><path d="M-190 -85 L-85 -155 L85 -145 L190 -65 L160 110 L45 170 L-130 125 L-195 20Z" fill="url(#ice-body)" stroke="#C8F6FF" stroke-width="6"/><path d="M-190 -85 L0 -20 L190 -65 M0 -20 L45 170 M0 -20 L-85 -155" fill="none" stroke="#FFFFFF" stroke-opacity=".48" stroke-width="3"/>${inner}<text x="0" y="128" text-anchor="middle" fill="#16424C" font-family="Inter,Arial" font-size="20" font-weight="700">≈ %90 SU ALTINDA</text></g>
     ${[0, 1, 2].map((i) => wave(825 + i * 48, 15 - i * 2, t * (1.5 - i * .2) + i * 1.3, i === 0 ? '#B0F3FA' : '#4AA8C0')).join('')}
     <g data-buoyancy-arrow="true" transform="translate(825 ${n(arrow)})" fill="${accent}" stroke="${accent}"><path d="M0 1000 V800" stroke-width="8"/><path d="M0 790 l-22 36 h44Z" stroke="none"/><text x="0" y="1050" text-anchor="middle" font-family="Inter,Arial" font-size="22" stroke="none">KALDIRMA</text></g>
-    ${label('DALGA  +  YÜZME  +  MOLEKÜLER KAFES')}</g>`;
+    </g>`;
 }
 function orbital(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const angle = t * .35;
   const mx = 540 + Math.cos(angle) * 330, my = 900 + Math.sin(angle) * 170;
   const stars = Array.from({ length: settings.particleCount }, (_, i) => `<circle data-star="${i}" cx="${n(hash(scene.id, i) * 1000 + 40)}" cy="${n(390 + hash(scene.id, i + 40) * 1040)}" r="${n(1 + hash(scene.id, i + 80) * 3)}" fill="#EAF8F2" opacity="${n(.2 + .65 * (.5 + .5 * Math.sin(t * 2 + i)))}"/>`).join('');
   return `<g data-animation-layer="orbital">${stars}<ellipse cx="540" cy="900" rx="330" ry="170" fill="none" stroke="#AFC5BD" stroke-opacity=".3" stroke-width="3" stroke-dasharray="8 12"/>
-    <g transform="translate(540 900)"><circle r="220" fill="#DDE97A"/><g data-rotating-planet="true" transform="rotate(${n(t * 9)})"><path d="M-120 -160 Q-20 -90 80 -170 L170 -70 Q30 -20 -180 -60Z M-160 60 Q-40 10 100 80 L40 190 Q-70 180 -160 60Z" fill="#6EB4A0" opacity=".7"/></g><circle r="220" fill="none" stroke="#F1F8C8" stroke-width="5"/><ellipse rx="305" ry="90" fill="none" stroke="${accent}" stroke-width="13" transform="rotate(-18)" opacity=".6"/></g>
-    <g data-orbiting-moon="true" transform="translate(${n(mx)} ${n(my)})"><circle r="58" fill="#DFE8E3"/><circle cx="-15" cy="-8" r="12" fill="#AABAB2"/><circle cx="18" cy="19" r="8" fill="#B7C5BE"/></g>${label('YÖRÜNGE  +  EKSEN DÖNÜŞÜ')}</g>`;
+    <g transform="translate(540 900)"><circle r="220" fill="#DDE97A" opacity=".5"/><g data-rotating-planet="true" transform="rotate(${n(t * 9)})"><path d="M-120 -160 Q-20 -90 80 -170 L170 -70 Q30 -20 -180 -60Z M-160 60 Q-40 10 100 80 L40 190 Q-70 180 -160 60Z" fill="#6EB4A0" opacity=".7"/></g><circle r="220" fill="none" stroke="#F1F8C8" stroke-width="5"/><ellipse rx="305" ry="90" fill="none" stroke="${accent}" stroke-width="13" transform="rotate(-18)" opacity=".6"/></g>
+    <g data-orbiting-moon="true" transform="translate(${n(mx)} ${n(my)})"><circle r="58" fill="#DFE8E3"/><circle cx="-15" cy="-8" r="12" fill="#AABAB2"/><circle cx="18" cy="19" r="8" fill="#B7C5BE"/></g></g>`;
 }
 function galaxy(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const count = Math.max(30, settings.particleCount * 3);
@@ -228,7 +246,7 @@ function galaxy(scene: Scene, t: number, accent: string, settings: ResolvedAnima
     const arm = i % 3, r = 35 + (i / count) * 390, a = i * .43 + arm * TAU / 3 + t * (.12 + .2 * (1 - i / count));
     return `<circle data-galaxy-star="${i}" cx="${n(540 + Math.cos(a) * r)}" cy="${n(900 + Math.sin(a) * r * .52)}" r="${n(2 + hash(scene.id, i) * 5)}" fill="${i % 4 ? '#DCEBE4' : accent}" opacity="${n(.25 + hash(scene.id, i + 30) * .7)}"/>`;
   }).join('');
-  return `<g data-animation-layer="galaxy"><ellipse cx="540" cy="900" rx="450" ry="245" fill="#6581A5" opacity=".06" transform="rotate(${n(t * 2)} 540 900)"/>${stars}<circle cx="540" cy="900" r="${n(80 + Math.sin(t) * 8)}" fill="${accent}" opacity=".75"/><circle cx="540" cy="900" r="32" fill="#F7FFE7"/>${label('YILDIZLARIN VE KOLLARIN HAREKETİ')}</g>`;
+  return `<g data-animation-layer="galaxy"><ellipse cx="540" cy="900" rx="450" ry="245" fill="#6581A5" opacity=".06" transform="rotate(${n(t * 2)} 540 900)"/>${stars}<circle cx="540" cy="900" r="${n(80 + Math.sin(t) * 8)}" fill="${accent}" opacity=".75"/><circle cx="540" cy="900" r="32" fill="#F7FFE7"/></g>`;
 }
 function cellular(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const count = Math.max(7, Math.round(settings.particleCount * .5));
@@ -237,7 +255,7 @@ function cellular(scene: Scene, t: number, accent: string, settings: ResolvedAni
     const y = 520 + hash(scene.id, i + 40) * 800 + Math.sin(t + i) * 30;
     return `<g data-cell="${i}" transform="translate(${n(x)} ${n(y)}) rotate(${n(t * 8 + i * 20)})"><circle r="65" fill="#6CBFAA" fill-opacity=".15" stroke="#91D6BC" stroke-width="4"/><circle data-nucleus="${i}" r="${n(22 + Math.sin(t * 2 + i) * 4)}" fill="${accent}" opacity=".65"/><path d="M-48 0 Q0 -40 48 0 Q0 40 -48 0Z" fill="none" stroke="#91D6BC" stroke-opacity=".5"/></g>`;
   }).join('');
-  return `<g data-animation-layer="cellular"><path d="M70 900 Q540 450 1010 900 Q540 1350 70 900Z" fill="#326C62" opacity=".12" stroke="#78B7A5" stroke-width="3"/>${cells}${label('HÜCRE  +  AKIŞ  +  CANLI HAREKET')}</g>`;
+  return `<g data-animation-layer="cellular"><path d="M70 900 Q540 450 1010 900 Q540 1350 70 900Z" fill="#326C62" opacity=".12" stroke="#78B7A5" stroke-width="3"/>${cells}</g>`;
 }
 function energyWaves(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const waves = Array.from({ length: 5 }, (_, i) => wave(560 + i * 155, 35 + i * 7, t * (1.2 + i * .15) + i * .7, i % 2 ? '#69D2E4' : accent)).join('');
@@ -245,12 +263,12 @@ function energyWaves(scene: Scene, t: number, accent: string, settings: Resolved
     const x = (i * 97 + t * 70 * settings.intensity) % 1080, lane = i % 5, y = 560 + lane * 155 + Math.sin(x / 105 + t * (1.2 + lane * .15) + lane * .7) * (35 + lane * 7);
     return `<circle data-energy-particle="${i}" cx="${n(x)}" cy="${n(y)}" r="7" fill="${i % 2 ? accent : '#A5F0FA'}"/>`;
   }).join('');
-  return `<g data-animation-layer="energy-waves"><circle cx="540" cy="900" r="${n(310 + Math.sin(t) * 25)}" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="18 25" stroke-dashoffset="${n(-t * 30)}" opacity=".35"/>${waves}${particles}${label('DALGA  +  ENERJİ  +  PARÇACIK AKIŞI')}</g>`;
+  return `<g data-animation-layer="energy-waves"><circle cx="540" cy="900" r="${n(310 + Math.sin(t) * 25)}" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="18 25" stroke-dashoffset="${n(-t * 30)}" opacity=".35"/>${waves}${particles}</g>`;
 }
 function geological(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const shift = Math.sin(t * .65) * 28 * settings.intensity;
   const magma = Array.from({ length: Math.max(8, settings.particleCount / 2) }, (_, i) => `<circle data-magma-particle="${i}" cx="${n(430 + hash(scene.id, i) * 220)}" cy="${n(1370 - ((t * 30 + i * 63) % 430))}" r="${n(5 + hash(scene.id, i + 20) * 9)}" fill="${i % 2 ? '#F39A59' : accent}" opacity=".65"/>`).join('');
-  return `<g data-animation-layer="geological"><circle cx="540" cy="1230" r="310" fill="#D97A4B" opacity=".08"/>${magma}<g data-left-plate="true" transform="translate(${n(-shift)} 0)"><path d="M0 700 L490 760 L490 1030 L0 1100Z" fill="#668C78" opacity=".65" stroke="#A0BEA8" stroke-width="4"/><path d="M0 700 L490 760" stroke="${accent}" stroke-width="12"/></g><g data-right-plate="true" transform="translate(${n(shift)} 0)"><path d="M1080 700 L590 760 L590 1030 L1080 1100Z" fill="#527969" opacity=".65" stroke="#A0BEA8" stroke-width="4"/><path d="M1080 700 L590 760" stroke="${accent}" stroke-width="12"/></g><path d="M540 710 L520 810 L560 900 L530 1040" fill="none" stroke="#F2B06F" stroke-width="8" stroke-dasharray="12 10"/>${label('LEVHA  +  AKIŞ  +  SÜRTÜNME')}</g>`;
+  return `<g data-animation-layer="geological"><circle cx="540" cy="1230" r="310" fill="#D97A4B" opacity=".08"/>${magma}<g data-left-plate="true" transform="translate(${n(-shift)} 0)"><path d="M0 700 L490 760 L490 1030 L0 1100Z" fill="#668C78" opacity=".4" stroke="#A0BEA8" stroke-width="4"/><path d="M0 700 L490 760" stroke="${accent}" stroke-width="12"/></g><g data-right-plate="true" transform="translate(${n(shift)} 0)"><path d="M1080 700 L590 760 L590 1030 L1080 1100Z" fill="#527969" opacity=".4" stroke="#A0BEA8" stroke-width="4"/><path d="M1080 700 L590 760" stroke="${accent}" stroke-width="12"/></g><path d="M540 710 L520 810 L560 900 L530 1040" fill="none" stroke="#F2B06F" stroke-width="8" stroke-dasharray="12 10"/></g>`;
 }
 function weatherSystems(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const clouds = Array.from({ length: 3 }, (_, i) => {
@@ -260,10 +278,10 @@ function weatherSystems(scene: Scene, t: number, accent: string, settings: Resol
       const dx = (j % 7) * 25 - 75, dy = (j * 61 + t * (130 + i * 20) * settings.intensity) % 390;
       return `<path data-rain-drop="${i}-${j}" d="M${n(dx)} ${n(70 + dy)} l-10 25" stroke="#79D8EA" stroke-width="5" stroke-linecap="round" opacity="${n((1 - dy / 390) * .8)}"/>`;
     }).join('');
-    return `<g data-weather-cloud="${i}" transform="translate(${n(x)} ${n(y)})"><g fill="#B9D2D0" opacity=".82"><circle cx="-65" cy="15" r="55"/><circle cx="0" cy="-20" r="80"/><circle cx="75" cy="20" r="58"/><rect x="-110" y="15" width="230" height="65" rx="32"/></g>${drops}</g>`;
+    return `<g data-weather-cloud="${i}" transform="translate(${n(x)} ${n(y)})"><g fill="#B9D2D0" opacity=".55"><circle cx="-65" cy="15" r="55"/><circle cx="0" cy="-20" r="80"/><circle cx="75" cy="20" r="58"/><rect x="-110" y="15" width="230" height="65" rx="32"/></g>${drops}</g>`;
   }).join('');
   return `<g data-animation-layer="weather-systems"><g data-sun-rotation="true" transform="translate(865 455) rotate(${n(t * 12)})" stroke="${accent}" stroke-width="6">${Array.from({ length: 8 }, (_, i) => `<path d="M0 -75 V-105" transform="rotate(${i * 45})"/>`).join('')}<circle r="52" fill="${accent}" stroke="none"/></g>
-    <path data-wind-flow="true" d="M50 450 Q300 350 520 470 T1030 430 M20 1170 Q300 1060 570 1180 T1060 1100" fill="none" stroke="${accent}" stroke-width="4" stroke-dasharray="20 18" stroke-dashoffset="${n(-t * 55)}" opacity=".45"/>${clouds}${label('HAVA AKIMI  +  BULUT  +  YAĞIŞ')}</g>`;
+    <path data-wind-flow="true" d="M50 450 Q300 350 520 470 T1030 430 M20 1170 Q300 1060 570 1180 T1060 1100" fill="none" stroke="${accent}" stroke-width="4" stroke-dasharray="20 18" stroke-dashoffset="${n(-t * 55)}" opacity=".45"/>${clouds}</g>`;
 }
 type Point = [number, number];
 function cubicPoint(a: Point, b: Point, c: Point, d: Point, p: number): Point {
@@ -281,7 +299,7 @@ function riverFlow(scene: Scene, t: number, accent: string, settings: ResolvedAn
     const [x, y] = riverPoint(progress);
     return `<g data-river-particle="${i}" transform="translate(${n(x)} ${n(y)}) rotate(${n(progress * 220 + t * 12)})"><path d="M-17 0 Q0 -9 17 0" fill="none" stroke="${i % 3 ? '#A1EDF4' : accent}" stroke-width="5" stroke-linecap="round"/><circle r="3" fill="#E6FFFF"/></g>`;
   }).join('');
-  return `<g data-animation-layer="river-flow"><path d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#314D3B" stroke-width="360" stroke-linecap="round"/><path d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#27677A" stroke-width="275" stroke-linecap="round"/><path data-river-current="true" d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#66C7D9" stroke-width="5" stroke-dasharray="22 34" stroke-dashoffset="${n(-t * 50)}" opacity=".65"/>${particles}<g fill="${accent}" opacity=".55"><circle cx="150" cy="1240" r="8"/><circle cx="930" cy="460" r="11"/></g>${label('AKIŞ  +  TAŞIMA  +  NEHİR')}</g>`;
+  return `<g data-animation-layer="river-flow"><path d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#314D3B" stroke-width="360" opacity=".55" stroke-linecap="round"/><path d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#27677A" stroke-width="275" opacity=".55" stroke-linecap="round"/><path data-river-current="true" d="M-80 600 C230 430 400 1030 700 790 C950 590 760 1290 1160 1130" fill="none" stroke="#66C7D9" stroke-width="5" stroke-dasharray="22 34" stroke-dashoffset="${n(-t * 50)}" opacity=".65"/>${particles}<g fill="${accent}" opacity=".55"><circle cx="150" cy="1240" r="8"/><circle cx="930" cy="460" r="11"/></g></g>`;
 }
 function reaction(scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const approach = smooth((Math.sin(t * .8) + 1) / 2);
@@ -291,7 +309,7 @@ function reaction(scene: Scene, t: number, accent: string, settings: ResolvedAni
     const y = 740 + local * 135 + Math.sin(t + i) * 12 * settings.intensity;
     return `<g data-reacting-atom="${i}" transform="translate(${n(x)} ${n(y)})"><circle r="46" fill="${i % 2 ? accent : '#68CDE1'}" opacity=".85"/><text x="0" y="9" text-anchor="middle" fill="#14231E" font-family="Inter,Arial" font-size="28" font-weight="800">${i % 2 ? 'B' : 'A'}</text></g>`;
   }).join('');
-  return `<g data-animation-layer="reaction" data-reaction-progress="${n(approach)}"><path d="M160 520 H920" stroke="#FFFFFF" stroke-opacity=".12"/><text x="540" y="480" text-anchor="middle" fill="#F3F7F4" font-family="Inter,Arial" font-size="39" font-weight="700">BAĞLAR DEĞİŞİR</text><g data-reaction-bond="true" opacity="${n(approach)}" stroke="${accent}" stroke-width="9"><path d="M450 760 H630 M450 895 H630 M450 1030 H630 M450 1165 H630"/></g>${atoms}<text x="540" y="1340" text-anchor="middle" fill="${accent}" font-family="Inter,Arial" font-size="42">${approach > .5 ? 'A₂ + B₂  →  2AB' : 'A + B  ⇄  AB'}</text>${label('YAKLAŞMA  +  BAĞ KURMA  +  DÖNÜŞÜM')}</g>`;
+  return `<g data-animation-layer="reaction" data-reaction-progress="${n(approach)}"><path d="M160 520 H920" stroke="#FFFFFF" stroke-opacity=".12"/><text x="540" y="480" text-anchor="middle" fill="#F3F7F4" font-family="Inter,Arial" font-size="39" font-weight="700">BAĞLAR DEĞİŞİR</text><g data-reaction-bond="true" opacity="${n(approach)}" stroke="${accent}" stroke-width="9"><path d="M450 760 H630 M450 895 H630 M450 1030 H630 M450 1165 H630"/></g>${atoms}<text x="540" y="1340" text-anchor="middle" fill="${accent}" font-family="Inter,Arial" font-size="42">${approach > .5 ? 'A₂ + B₂  →  2AB' : 'A + B  ⇄  AB'}</text></g>`;
 }
 function signalOverlay(project: Project, scene: Scene, t: number, accent: string, settings: ResolvedAnimation, neural: boolean): string {
   const signals = Array.from({ length: Math.max(8, settings.particleCount) }, (_, i) => {
@@ -299,40 +317,61 @@ function signalOverlay(project: Project, scene: Scene, t: number, accent: string
     const x = 540 + Math.cos(angle) * radius, y = 910 + Math.sin(angle) * radius * 1.25;
     return `<circle data-signal-particle="${i}" cx="${n(x)}" cy="${n(y)}" r="${n(4 + i % 4)}" fill="${i % 2 ? accent : '#74D8E7'}" opacity="${n(.3 + .6 * (.5 + .5 * Math.sin(t * 3 + i)))}"/>`;
   }).join('');
-  return `${diagramFor(project, scene, accent)}<g data-animation-layer="${neural ? 'neural' : 'data-flow'}">${signals}<circle cx="540" cy="900" r="${n(330 + Math.sin(t * 2) * 18)}" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="8 20" stroke-dashoffset="${n(-t * 40)}" opacity=".35"/></g>`;
+  return `<g data-animation-layer="${neural ? 'neural' : 'data-flow'}">${signals}<circle cx="540" cy="900" r="${n(330 + Math.sin(t * 2) * 18)}" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="8 20" stroke-dashoffset="${n(-t * 40)}" opacity=".35"/></g>`;
 }
 function generic(project: Project, scene: Scene, t: number, accent: string, settings: ResolvedAnimation): string {
   const particles = Array.from({ length: Math.max(10, settings.particleCount) }, (_, i) => {
     const a = i * TAU / Math.max(10, settings.particleCount) + t * .18 * (i % 2 ? 1 : -1), r = 260 + (i % 4) * 65;
     return `<g data-science-particle="${i}" transform="translate(${n(540 + Math.cos(a) * r)} ${n(900 + Math.sin(a) * r * .75)})"><circle r="${n(5 + i % 5)}" fill="${i % 3 ? accent : '#71D5E5'}"/><circle r="${n(12 + i % 5)}" fill="none" stroke="${accent}" opacity=".25"/></g>`;
   }).join('');
-  return `${diagramFor(project, scene, accent)}<g data-animation-layer="generic-particles">${particles}<ellipse cx="540" cy="900" rx="420" ry="315" fill="none" stroke="${accent}" stroke-width="2" stroke-dasharray="5 18" stroke-dashoffset="${n(t * 25)}" opacity=".3"/></g>`;
+  return `<g data-animation-layer="generic-particles">${particles}<ellipse cx="540" cy="900" rx="420" ry="315" fill="none" stroke="${accent}" stroke-width="2" stroke-dasharray="5 18" stroke-dashoffset="${n(t * 25)}" opacity=".3"/></g>`;
 }
+
+/** Klip tanımlayıcıları aynı belgede benzersiz olmalı (önizleme sayfası birden çok SVG barındırır). */
+let clipCounter = 0;
 
 export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity: ChannelIdentity, timeSeconds: number): string {
   const settings = resolveAnimation(project, scene);
   const duration = Math.max(.1, scene.duration || 10);
   const t = Math.max(0, timeSeconds) * settings.speed;
   const accent = identity.primaryColor || '#D8FF65';
-  let artwork: string;
+  // BUILD 44: KONUYA ÖZGÜ DİYAGRAM HER ZAMAN çizilir; animasyon katmanı
+  // onun ÜZERİNE eklenir. Önceki sürümde bazı ön ayarlar diyagramı TAMAAMEN
+  // değiştiriyordu (ör. 'cellular'), bu yüzden farklı konular aynı yuvarlak
+  // hücre görselini alıyordu.
+  const base = diagramFor(project, scene, accent);
+  // Etiketler gövdeden AYRILIR: hareket katmanı etiket bandına sızmasın diye
+  // klip edilir, etiketler ise en üstte, okunaklı biçimde çizilir.
+  const { body, labels } = splitDiagramLabels(base);
+  let motion: string;
   switch (settings.preset) {
-    case 'light-scattering': artwork = lightScattering(scene, t, duration, accent, settings); break;
-    case 'liquid-molecules': artwork = liquid(scene, t, duration, accent, settings); break;
-    case 'crystallization': artwork = crystallization(scene, t, duration, accent, settings); break;
-    case 'lattice-expansion': artwork = latticeExpansion(scene, t, duration, accent, settings); break;
-    case 'floating-ice': artwork = floatingIce(scene, t, duration, accent, settings); break;
-    case 'orbital': artwork = orbital(scene, t, accent, settings); break;
-    case 'galaxy': artwork = galaxy(scene, t, accent, settings); break;
-    case 'cellular': artwork = cellular(scene, t, accent, settings); break;
-    case 'energy-waves': artwork = energyWaves(scene, t, accent, settings); break;
-    case 'geological': artwork = geological(scene, t, accent, settings); break;
-    case 'weather-systems': artwork = weatherSystems(scene, t, accent, settings); break;
-    case 'river-flow': artwork = riverFlow(scene, t, accent, settings); break;
-    case 'reaction': artwork = reaction(scene, t, accent, settings); break;
-    case 'neural': artwork = signalOverlay(project, scene, t, accent, settings, true); break;
-    case 'data-flow': artwork = signalOverlay(project, scene, t, accent, settings, false); break;
-    default: artwork = generic(project, scene, t, accent, settings); break;
+    case 'light-scattering': motion = lightScattering(scene, t, duration, accent, settings); break;
+    case 'liquid-molecules': motion = liquid(scene, t, duration, accent, settings); break;
+    case 'crystallization': motion = crystallization(scene, t, duration, accent, settings); break;
+    case 'lattice-expansion': motion = latticeExpansion(scene, t, duration, accent, settings); break;
+    case 'floating-ice': motion = floatingIce(scene, t, duration, accent, settings); break;
+    case 'orbital': motion = orbital(scene, t, accent, settings); break;
+    case 'galaxy': motion = galaxy(scene, t, accent, settings); break;
+    case 'cellular': motion = cellular(scene, t, accent, settings); break;
+    case 'energy-waves': motion = energyWaves(scene, t, accent, settings); break;
+    case 'geological': motion = geological(scene, t, accent, settings); break;
+    case 'weather-systems': motion = weatherSystems(scene, t, accent, settings); break;
+    case 'river-flow': motion = riverFlow(scene, t, accent, settings); break;
+    case 'reaction': motion = reaction(scene, t, accent, settings); break;
+    case 'neural': motion = signalOverlay(project, scene, t, accent, settings, true); break;
+    case 'data-flow': motion = signalOverlay(project, scene, t, accent, settings, false); break;
+    default: motion = generic(project, scene, t, accent, settings); break;
   }
+  // Hareket katmanı yarı saydam bir VURGU katmanıdır; konu diyagramı okunur kalır.
+  // Etiket bandının altına taşan parçacıklar klip ile kesilir.
+  // Hareket katmanı, etiket bandına doğru YUMUŞAK biçimde sönümlenir:
+  // sert bir klip çizgisi görselde bir kesik oluşturuyordu.
+  const clipId = `motion-fade-${(clipCounter += 1)}`;
+  const fade = `<linearGradient id="${clipId}" gradientUnits="userSpaceOnUse" x1="0" y1="${CAPTION_BAND_TOP - 260}" x2="0" y2="${CAPTION_BAND_TOP}">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#000000"/></linearGradient>
+    <mask id="${clipId}-m" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920">
+      <rect x="0" y="0" width="1080" height="1920" fill="url(#${clipId})"/></mask>`;
+  const artwork = body + fade + `<g data-motion-layer="true" opacity=".58" mask="url(#${clipId}-m)">${motion}</g>` + labels;
   const p = clamp(timeSeconds / duration);
   const camera = scene.cameraMovement || 'static';
   const scale = camera === 'zoom-in' ? 1 + p * .035 : camera === 'zoom-out' ? 1.035 - p * .035 : 1;
