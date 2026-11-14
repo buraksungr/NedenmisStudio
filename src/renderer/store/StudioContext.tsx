@@ -26,7 +26,27 @@ export function StudioProvider({ children }: PropsWithChildren): ReactNode {
   useEffect(() => { Promise.all([refreshProjects(), refreshSettings()]).then(() => setReady(true)).catch((error) => { toast(`Uygulama başlatılamadı: ${error.message}`, 'error'); setReady(true); }); }, [refreshProjects, refreshSettings, toast]);
   useEffect(() => { const handler = (event: PromiseRejectionEvent) => { event.preventDefault(); const reason = event.reason as { message?: string; nedenmisHandled?: boolean }; if (!reason?.nedenmisHandled) toast((reason?.message || 'Beklenmeyen bir işlem hatası oluştu.').replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''), 'error'); }; window.addEventListener('unhandledrejection', handler); return () => window.removeEventListener('unhandledrejection', handler); }, [toast]);
   useEffect(() => { if (!settings) return; const dark = settings.theme === 'dark' || (settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches); document.documentElement.classList.toggle('dark', dark); }, [settings]);
-  const run = useCallback(async <T,>(label: string, operation: () => Promise<T>, successMessage?: string): Promise<T> => { setBusy(label); try { const result = await operation(); if (successMessage) toast(successMessage, 'success'); return result; } catch (error) { const raw = error instanceof Error ? error.message : String(error); toast(raw.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''), 'error'); if (error && typeof error === 'object') Object.assign(error, { nedenmisHandled: true }); throw error; } finally { setBusy(''); } }, [toast]);
+  /**
+   * Ortak işlem yardımcısı: hata olursa BİR bildirim gösterir ve hatayı
+   * çağırana fırlatır.
+   *
+   * `run()` çağrıları çoğunlukla "yangın-ve-unut" biçimindedir (`void run(...)`).
+   * Fırlatılan hata, çağıran tarafından yakalanmadığında "işlenmemiş promise
+   * reddi" olarak raporlanır ve ikinci kez bildirim üretir. Bunu önlemek için
+   * döndürülen promise'e bir "yok say" işleyicisi bağlanır: çağıran `await`
+   * ederse hata yine kendisine ulaşır, yok sayarsa sessizce çöpe gider —
+   * bildirim zaten `catch` içinde üretilmiştir.
+   */
+  const run = useCallback(<T,>(label: string, operation: () => Promise<T>, successMessage?: string): Promise<T> => {
+    setBusy(label);
+    const promise = (async () => {
+      try { const result = await operation(); if (successMessage) toast(successMessage, 'success'); return result; }
+      catch (error) { const raw = error instanceof Error ? error.message : String(error); toast(raw.replace(/^Error invoking remote method '[^']+':\s*(Error:\s*)?/, ''), 'error'); if (error && typeof error === 'object') Object.assign(error, { nedenmisHandled: true }); throw error; }
+      finally { setBusy(''); }
+    })();
+    promise.catch(() => undefined);
+    return promise;
+  }, [toast]);
   const value = useMemo<StudioValue>(() => ({
     page, navigate: (next) => setPage(next), projects, settings: settings!, identity: identity!, activeProject, ready, busy, refreshProjects, refreshSettings,
     openProject: async (id) => { const project = await run('Proje açılıyor', () => window.nedenmis.projects.get(id)); setActiveProject(project); setPage('editor'); },
