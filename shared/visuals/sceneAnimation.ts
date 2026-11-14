@@ -1,6 +1,6 @@
 import type { AnimationPreset, ChannelIdentity, Project, ResolvedAnimation, Scene, SceneAnimationSettings } from '../types.js';
 import { buildArtworkSvg, diagramFor } from './sceneArtwork.js';
-import { CAPTION_BAND_TOP, splitDiagramLabels } from './sceneDiagrams.js';
+import { splitDiagramLabels } from './sceneDiagrams.js';
 import { classifyScene } from './sceneComposition.js';
 
 export const ANIMATION_PRESETS: { id: AnimationPreset; label: string }[] = [
@@ -191,18 +191,30 @@ function crystallization(scene: Scene, t: number, duration: number, accent: stri
     x: mix(100 + hash(scene.id, i) * 880, target.x, progress) + Math.sin(t * 4 + i) * 15 * (1 - progress) * settings.intensity,
     y: mix(540 + hash(scene.id, i + 30) * 850, target.y, progress) + Math.cos(t * 3 + i) * 13 * (1 - progress) * settings.intensity,
   }));
+  // Kristalleşme tamamlandığında noktalar hedefe oturur ve salınım sıfıra
+  // düşer; sahne ikinci yarıda "donuyordu". Kafesin geometrisi BOZULMADAN
+  // (rijit bir kayma+dönme ile) sürekli hareket ettirilir: eşit kenarlı
+  // altıgen çevrim özelliği korunur.
+  const driftX = Math.sin(t * 1.9) * 7 * settings.intensity;
+  const driftY = Math.cos(t * 1.55) * 6 * settings.intensity;
+  const tilt = Math.sin(t * 1.15) * .7 * settings.intensity;
   const bonds = crystalLinks(positions).map(([from, to, id], index) => `<line data-crystal-bond="${id}" x1="${n(from.x)}" y1="${n(from.y)}" x2="${n(to.x)}" y2="${n(to.y)}" stroke="${index % 2 ? '#74D5E5' : accent}" stroke-width="5" opacity="${n(progress * .65)}"/>`);
   const molecules = positions.map((point, i) => molecule(`crystal-${i}`, point.x, point.y, .66, (1 - progress) * Math.sin(t * 2 + i) * 45, accent, .45 + progress * .55)).join('');
   return `<g data-animation-layer="crystallization" data-crystal-progress="${n(progress)}">
     <circle cx="540" cy="950" r="${n(280 + progress * 90)}" fill="#5FD2E6" opacity="${n(.025 + progress * .045)}"/>
     <path d="M180 510 H900" stroke="#FFFFFF" stroke-opacity=".12"/><text x="540" y="470" text-anchor="middle" fill="#F2F8F5" font-family="Inter,Arial" font-size="39" font-weight="700">DÜZENSİZLİKTEN KRİSTALE</text>
     <text x="540" y="520" text-anchor="middle" fill="#AFC5BD" font-family="Inter,Arial" font-size="25">Soğudukça moleküller düzenli bağlar kurar</text>
-    <g>${bonds.join('')}</g>${molecules}<g transform="translate(540 1330)"><path d="M-130 0 H130" stroke="${accent}" stroke-width="4"/><path d="M-130 0 l20 -12 v24Z M130 0 l-20 -12 v24Z" fill="${accent}" opacity="${n(progress)}"/></g>
+    <g data-crystal-drift="true" transform="translate(${n(driftX)} ${n(driftY)}) rotate(${n(tilt)} 540 950)"><g>${bonds.join('')}</g>${molecules}</g><g transform="translate(540 1330)"><path d="M-130 0 H130" stroke="${accent}" stroke-width="4"/><path d="M-130 0 l20 -12 v24Z M130 0 l-20 -12 v24Z" fill="${accent}" opacity="${n(progress)}"/></g>
     ${label(progress < .5 ? 'MOLEKÜLLER YAKLAŞIYOR' : 'DÜZENLİ KRİSTAL KAFES')}</g>`;
 }
 function latticeExpansion(scene: Scene, t: number, duration: number, accent: string, settings: ResolvedAnimation): string {
   const progress = smooth(t / Math.max(1, duration * .85));
-  const scale = 1 + progress * .18 * settings.intensity;
+  // Kafes genişlemesi zamanla DOYGUNLAŞTIĞI için sahnenin ikinci yarısında
+  // hareket neredeyse duruyordu (MP4↔önizleme "nesne hareketi" eşiği
+  // düşüyordu). Moleküler kafesin sürekli TİTREŞİMİ bilimsel olarak da
+  // doğrudur: genişleme üzerine sürekli bir salınım eklenir.
+  const vibration = Math.sin(t * 1.7) * .014 * settings.intensity + Math.sin(t * 2.9 + 1.1) * .006 * settings.intensity;
+  const scale = 1 + progress * .18 * settings.intensity + vibration;
   const points = crystalPoints();
   const bonds = crystalLinks(points).map(([from, to, id]) => `<line data-lattice-bond="${id}" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}"/>`);
   const molecules = points.map((point, i) => molecule(`lattice-${i}`, point.x + Math.sin(t * 3 + i) * 2 * settings.intensity, point.y + Math.cos(t * 3 + i) * 2 * settings.intensity, .62, 0, accent)).join('');
@@ -342,7 +354,7 @@ export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity:
   const base = diagramFor(project, scene, accent);
   // Etiketler gövdeden AYRILIR: hareket katmanı etiket bandına sızmasın diye
   // klip edilir, etiketler ise en üstte, okunaklı biçimde çizilir.
-  const { body, labels } = splitDiagramLabels(base);
+  const { body, labels, captionTop, captionBottom } = splitDiagramLabels(base);
   let motion: string;
   switch (settings.preset) {
     case 'light-scattering': motion = lightScattering(scene, t, duration, accent, settings); break;
@@ -363,15 +375,24 @@ export function renderAnimatedSceneSvg(project: Project, scene: Scene, identity:
     default: motion = generic(project, scene, t, accent, settings); break;
   }
   // Hareket katmanı yarı saydam bir VURGU katmanıdır; konu diyagramı okunur kalır.
-  // Etiket bandının altına taşan parçacıklar klip ile kesilir.
-  // Hareket katmanı, etiket bandına doğru YUMUŞAK biçimde sönümlenir:
-  // sert bir klip çizgisi görselde bir kesik oluşturuyordu.
-  const clipId = `motion-fade-${(clipCounter += 1)}`;
-  const fade = `<linearGradient id="${clipId}" gradientUnits="userSpaceOnUse" x1="0" y1="${CAPTION_BAND_TOP - 260}" x2="0" y2="${CAPTION_BAND_TOP}">
-      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#000000"/></linearGradient>
-    <mask id="${clipId}-m" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920">
-      <rect x="0" y="0" width="1080" height="1920" fill="url(#${clipId})"/></mask>`;
-  const artwork = body + fade + `<g data-motion-layer="true" opacity=".58" mask="url(#${clipId}-m)">${motion}</g>` + labels;
+  //
+  // Etiketler ÜSTTE çizilir ve arkalarına yumuşak bir bant (caption plate)
+  // konur. Önceki yaklaşım hareket katmanını etiket bandına doğru MASKELERDİ;
+  // bu, bilimsel olarak anlamlı hareket göstergelerini (kafes genişleme
+  // okları, hacim endeksi, ölçüm çizgileri) yok ediyor ve "nesne hareketi"
+  // eşiğini düşürüyordu. Bant yaklaşımı hem etiketi okunaklı tutar hem de
+  // hareketin TAMAMINI korur.
+  const plateId = `caption-plate-${(clipCounter += 1)}`;
+  const plate = Number.isFinite(captionTop)
+    ? `<linearGradient id="${plateId}" gradientUnits="userSpaceOnUse" x1="0" y1="${captionTop - 92}" x2="0" y2="${captionBottom + 62}">
+        <stop offset="0" stop-color="#0A110F" stop-opacity="0"/>
+        <stop offset=".32" stop-color="#0A110F" stop-opacity=".55"/>
+        <stop offset=".72" stop-color="#0A110F" stop-opacity=".55"/>
+        <stop offset="1" stop-color="#0A110F" stop-opacity="0"/>
+      </linearGradient>
+      <rect data-caption-plate="true" x="0" y="${captionTop - 92}" width="1080" height="${captionBottom - captionTop + 154}" fill="url(#${plateId})"/>`
+    : '';
+  const artwork = body + `<g data-motion-layer="true" opacity=".72">${motion}</g>` + plate + labels;
   const p = clamp(timeSeconds / duration);
   const camera = scene.cameraMovement || 'static';
   const scale = camera === 'zoom-in' ? 1 + p * .035 : camera === 'zoom-out' ? 1.035 - p * .035 : 1;

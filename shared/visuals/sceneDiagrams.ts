@@ -33,11 +33,16 @@ const LABEL_RE = /<text x="\d+" y="\d+" font-family="Inter,Arial" font-size="\d+
  * Diyagramı "gövde" ve "etiketler" olarak ayırır.
  *
  * Etiketler hareket katmanının ÜZERİNDE çizilmelidir; aksi hâlde yarı
- * saydam hareket katmanı yazının üstüne biner.
+ * saydam hareket katmanı yazının üstüne biner. Etiketlerin dikey konumu da
+ * döndürülür: arkasına okunaklı bir bant (caption plate) çizilebilir.
  */
-export function splitDiagramLabels(svg: string): { body: string; labels: string } {
-  const found = svg.match(LABEL_RE);
-  return { body: svg.replace(LABEL_RE, ''), labels: found ? found.join('') : '' };
+export function splitDiagramLabels(svg: string): { body: string; labels: string; captionTop: number; captionBottom: number } {
+  const found = svg.match(LABEL_RE) ?? [];
+  const labels = found.join('');
+  const positions = [...labels.matchAll(/<text x="\d+" y="(\d+)"/g)].map((match) => Number(match[1]));
+  const captionTop = positions.length ? Math.min(...positions) : Number.POSITIVE_INFINITY;
+  const captionBottom = positions.length ? Math.max(...positions) : Number.NEGATIVE_INFINITY;
+  return { body: svg.replace(LABEL_RE, ''), labels, captionTop, captionBottom };
 }
 
 /** Deterministik parçacık dizisi (konu imzasından türetilir). */
